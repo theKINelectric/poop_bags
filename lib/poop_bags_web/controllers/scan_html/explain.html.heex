@@ -1,0 +1,99 @@
+<div class="scan-header">
+  <div>
+    <h1>Why this score</h1>
+    <p class="mono project-path">
+      {@finding.function_name} · {@finding.path}:{@finding.line}
+    </p>
+  </div>
+  <div class="scan-actions">
+    <span class={"badge badge-#{@band}"}>{@band_label}</span>
+    <.link href={~p"/scans/#{@scan.id}"} class="btn small">back to scan</.link>
+  </div>
+</div>
+
+<div class="card">
+  <h2>The arithmetic</h2>
+  <table class="table">
+    <tbody>
+      <tr>
+        <td>complexity</td>
+        <td class="mono">{@finding.complexity}</td>
+      </tr>
+      <tr>
+        <td>coverage used</td>
+        <td class="mono">
+          {round((@finding.coverage || 0.0) * 100)}% ({@finding.coverage_source})
+        </td>
+      </tr>
+      <tr>
+        <td>CRAP = cx² × (1 − cov)³ + cx</td>
+        <td class="mono">
+          {@finding.complexity}² × (1 − {round((@finding.coverage || 0.0) * 100)}%)³ + {@finding.complexity} =
+          <strong>{@finding.crap}</strong>
+        </td>
+      </tr>
+      <tr>
+        <td>violation threshold (this scan)</td>
+        <td class="mono">CRAP &gt; {@scan.threshold || 20.0}</td>
+      </tr>
+      <tr>
+        <td>span</td>
+        <td class="mono">lines {@finding.line}–{@finding.end_line}</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="hint">
+    Coverage provenance: <strong>{@finding.coverage_source}</strong>
+    — {case @finding.coverage_source do
+      "measured" ->
+        "counted from the ingested report's executable lines inside this function's span."
+
+      _ ->
+        "the report said nothing about this function (or none was ingested), so the scan's assumed coverage was used."
+    end}
+  </p>
+</div>
+
+<div class="card">
+  <h2>Where the complexity comes from</h2>
+
+  <%= cond do %>
+    <% @breakdown == :unavailable -> %>
+      <p class="empty">Source file not on disk anymore — breakdown unavailable.</p>
+    <% @breakdown == :error -> %>
+      <p class="empty">
+        Could not re-locate this function in the current file (it may have changed since the scan).
+      </p>
+    <% true -> %>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Construct</th>
+            <th>Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          <%= for {kind, n} <- @breakdown.contributions do %>
+            <tr>
+              <td class="mono">{kind}</td>
+              <td class="mono">+{n}</td>
+            </tr>
+          <% end %>
+          <tr>
+            <td>base</td>
+            <td class="mono">+1</td>
+          </tr>
+          <tr>
+            <td><strong>total</strong></td>
+            <td class="mono"><strong>{@finding.complexity}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+  <% end %>
+
+  <p class="hint">
+    Breakdown is recomputed from the file on disk; if the file changed since
+    the scan it may disagree with the stored score. Policy:
+    <span class="mono">{@scan.stats["policy"]}</span>
+  </p>
+</div>

@@ -1,0 +1,160 @@
+<div class="hero">
+  <div class="hero-logo">💩🛍️</div>
+  <h1>poop_bags</h1>
+  <p class="tagline">
+    Point it at a project directory. It bags the CRAP — <strong>C</strong>hange <strong>R</strong>isk <strong>A</strong>nti-<strong>P</strong>atterns —
+    function by function, in Elixir, Zig, Kotlin, and Swift.
+  </p>
+</div>
+
+<div class="card form-card">
+  <.form for={%{}} action={~p"/scans"} method="post" class="scan-form">
+    <div class="field">
+      <label for="scan_project_path">Project directory</label>
+      <input
+        type="text"
+        id="scan_project_path"
+        name="scan[project_path]"
+        placeholder="/absolute/path/to/project"
+        required
+        autofocus
+      />
+      <p class="hint">
+        An absolute path on this machine. Build caches, .git, and vendored trees are skipped.
+      </p>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="scan_label">Label <span class="optional">(optional)</span></label>
+        <input type="text" id="scan_label" name="scan[label]" placeholder="before the refactor" />
+      </div>
+      <div class="field">
+        <label for="scan_threshold">
+          Violation threshold <span class="optional">(optional)</span>
+        </label>
+        <input
+          type="number"
+          id="scan_threshold"
+          name="scan[threshold]"
+          value=""
+          min="0"
+          step="1"
+          placeholder="20"
+        />
+        <p class="hint">
+          CRAP above this counts as a violation for diffs and the CI gate. Blank = .poopbags.json or 20.
+        </p>
+      </div>
+      <div class="field">
+        <label for="scan_coverage">Assumed coverage %</label>
+        <input
+          type="number"
+          id="scan_coverage"
+          name="scan[coverage]"
+          value="0"
+          min="0"
+          max="100"
+          step="1"
+        />
+        <p class="hint">
+          CRAP = comp² × (1 − cov)³ + comp. Leave blank to assume 0%. Real
+          coverage comes from a report named in the project's
+          <span class="mono">.poopbags.json</span>
+          (LCOV or ExCoveralls JSON).
+        </p>
+      </div>
+    </div>
+
+    <button type="submit" class="btn primary">Bag it</button>
+  </.form>
+</div>
+
+<div class="card agent-card">
+  <h2>For agents 🤖</h2>
+  <p>
+    Built agent-first: everything below is a stable JSON contract. The whole loop from a shell —
+    start, poll, findings, diff:
+  </p>
+  <pre class="mono agent-recipe">
+# 1. bag a project (absolute path on this machine; 202 + scan id)
+curl -s http://localhost:4100/api/scans -H 'content-type: application/json' \
+     -d '&#123;"project_path": "/abs/path/to/project", "coverage": 0&#125;'
+
+# 2. poll until status is "done" (or "error")
+curl -s http://localhost:4100/api/scans/$ID
+
+# 3. worst-first findings (filter: ?language=zig&amp;limit=20)
+curl -s 'http://localhost:4100/api/scans/$ID/findings?limit=20'
+
+# 4. outcomes vs the previous scan + gate verdict
+curl -s 'http://localhost:4100/api/scans/$ID/diff?against=latest'</pre>
+  <ul class="agent-notes">
+    <li>
+      <span class="mono">GET /api</span> — the machine-readable contract (endpoints, semantics,
+      gate rules, retention behavior) for discovering all of this without a browser.
+    </li>
+    <li>
+      <strong>MCP server:</strong> <span class="mono">bin/poop_bags_mcp</span>
+      in the repo exposes <span class="mono">bag_project</span>, <span class="mono">scan_status</span>, <span class="mono">top_findings</span>,
+      <span class="mono">diff_latest</span>
+      over stdio —
+      wire it with <span class="mono">POOP_BAGS_URL</span>
+      (default <span class="mono">http://localhost:4100</span>).
+    </li>
+    <li>
+      From inside a checkout of this repo:
+      <span class="mono">mix poop_bags.ci --path . --against latest</span>
+      scans, diffs, gates,
+      and exits 1 on new violations (2 on scan failure).
+    </li>
+    <li>
+      The gate fails only on <em>introduced violations</em> or above-threshold regressions —
+      refactors that resolve or improve never fail it.
+    </li>
+  </ul>
+</div>
+
+<div class="card">
+  <h2>Recent scans</h2>
+
+  <%= if @scans == [] do %>
+    <p class="empty">Nothing bagged yet. The belts are warm.</p>
+  <% else %>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Project</th>
+          <th>Status</th>
+          <th>Files</th>
+          <th>Functions</th>
+          <th>Worst CRAP</th>
+          <th>Avg CRAP</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <%= for scan <- @scans do %>
+          <tr>
+            <td class="mono">{scan.id}</td>
+            <td>
+              <.link href={~p"/scans/#{scan.id}"} class="project-link">
+                <span class="project-name">{scan.label || Path.basename(scan.project_path)}</span>
+                <span class="project-path mono">{scan.project_path}</span>
+              </.link>
+            </td>
+            <td><span class={"status status-#{scan.status}"}>{scan.status}</span></td>
+            <td class="mono">{scan.files_done}/{scan.files_total}</td>
+            <td class="mono">{scan.functions_total}</td>
+            <td class="mono">{scan.worst_crap}</td>
+            <td class="mono">{scan.avg_crap}</td>
+            <td>
+              <.link href={~p"/scans/#{scan.id}"} class="btn small">open</.link>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</div>
