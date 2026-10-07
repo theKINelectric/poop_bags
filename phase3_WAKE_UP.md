@@ -1,6 +1,16 @@
 # phase3_WAKE_UP.md — poop_bags compaction handoff
 
-**Read this first, then go.** Written 2026-10-06 after completing phase 2; updated same day after completing **phase 3 step 1 (hotspots + trends + retention)**. You are resuming with full history compacted away; this file + the repo + README carry the state.
+**Read this first, then go.** Written 2026-10-06 after completing phase 2; updated same day after completing **phase 3 step 1 (hotspots + trends + retention)** and on 2026-10-07 after the **agent surface + publish + production deploy**. You are resuming with full history compacted away; this file + the repo + README carry the state.
+
+## Production (2026-10-07)
+
+- **Live** at loopback `http://localhost:4769` (launchd `ai.sag.poopbags`, house `bin/service`), LAN via phi `http://SS-Medea.local/poopbags/` (test with `http://192.168.1.209/poopbags/api` from SS-Medea). Ledger: `apps/poopbags/var/poop_bags.db`. Env (secrets) at `apps/poopbags/env`.
+- Deploy = `~/PRODUCTION_SERVERS/deploy/bin/deploy poopbags /Volumes/Centaurus-A/__centaurus_repos/poop_bags HEAD`, then `launchctl kickstart -k gui/$(id -u)/ai.sag.poopbags` (bin/deploy flips the symlink; the kick loads the new release). env.example + lan.Caddyfile live in the deploy repo.
+- Migrations run on every boot (single-node SQLite; `SKIP_MIGRATIONS=1` opts out).
+- Git: `main` pushed to `git@codeberg.org:kin_electric/poop_bags.git`.
+- Agent surface: `GET /api` discovery contract, front-page agent card (host-relative `$HOST` recipe), MCP escript **committed** at `bin/poop_bags_mcp` (build: `mix escript.build`; escript config has `app: nil` — the script must never boot the supervision tree, the SQLite NIF can't load inside an escript), skill at `skills/poopbags/` + installed at `~/.agents/skills/poopbags`.
+- flow_extra dep auto-detects: sibling path dep when `../flow_extra/lib` exists, else codeberg git dep (public clones work).
+- Dev-server gotcha: a backgrounded `mix phx.server` shares `_build/dev` with foreground mix runs — foreground `mix test`/`compile` kills the server; restart it after heavy mix work.
 
 ## What this project is
 
