@@ -77,18 +77,21 @@
     start, poll, findings, diff:
   </p>
   <pre class="mono agent-recipe">
+# 0. the service you're reading this from (dev runs :4100, production :4769)
+HOST=http://localhost:4100
+
 # 1. bag a project (absolute path on this machine; 202 + scan id)
-curl -s http://localhost:4100/api/scans -H 'content-type: application/json' \
+curl -s $HOST/api/scans -H 'content-type: application/json' \
      -d '&#123;"project_path": "/abs/path/to/project", "coverage": 0&#125;'
 
 # 2. poll until status is "done" (or "error")
-curl -s http://localhost:4100/api/scans/$ID
+curl -s $HOST/api/scans/$ID
 
 # 3. worst-first findings (filter: ?language=zig&amp;limit=20)
-curl -s 'http://localhost:4100/api/scans/$ID/findings?limit=20'
+curl -s "$HOST/api/scans/$ID/findings?limit=20"
 
 # 4. outcomes vs the previous scan + gate verdict
-curl -s 'http://localhost:4100/api/scans/$ID/diff?against=latest'</pre>
+curl -s "$HOST/api/scans/$ID/diff?against=latest"</pre>
   <ul class="agent-notes">
     <li>
       <span class="mono">GET /api</span> — the machine-readable contract (endpoints, semantics,
