@@ -20,6 +20,14 @@ if System.get_env("PHX_SERVER") do
   config :poop_bags, PoopBagsWeb.Endpoint, server: true
 end
 
+# Serving behind a path prefix (the phi door strips /<app>/ before
+# forwarding): generate every link under that prefix, and the endpoint's
+# accept_url_path plug tolerates the prefixed shape arriving directly.
+# Empty (the default) = root-served, as in dev.
+url_path = System.get_env("PHX_URL_PATH", "")
+config :poop_bags, :url_path, url_path
+config :poop_bags, PoopBagsWeb.Endpoint, url: [path: url_path]
+
 if config_env() == :prod do
   database_path =
     System.get_env("DATABASE_PATH") ||

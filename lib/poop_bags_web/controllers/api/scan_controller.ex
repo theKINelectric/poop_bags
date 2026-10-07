@@ -20,7 +20,7 @@ defmodule PoopBagsWeb.API.ScanController do
   service over HTTP — endpoints, the poll loop, semantics, and MCP wiring.
   """
   def discover(conn, _params) do
-    base = "#{conn.scheme}://#{conn.host}:#{conn.port}"
+    base = self_base(conn)
 
     json(conn, %{
       service: "poop_bags",
@@ -97,7 +97,11 @@ defmodule PoopBagsWeb.API.ScanController do
           :ok ->
             conn
             |> put_status(:accepted)
-            |> json(%{id: scan.id, status: "running", show_url: url(~p"/scans/#{scan.id}")})
+            |> json(%{
+              id: scan.id,
+              status: "running",
+              show_url: self_base(conn) <> "/scans/#{scan.id}"
+            })
 
           {:error, :busy} ->
             Catalog.fail_scan(scan, "scan belts are busy")
@@ -147,7 +151,7 @@ defmodule PoopBagsWeb.API.ScanController do
       error: scan.error,
       started_at: scan.started_at,
       finished_at: scan.finished_at,
-      findings_url: url(~p"/api/scans/#{scan.id}/findings")
+      findings_url: self_base(conn) <> "/api/scans/#{scan.id}/findings"
     })
   end
 
@@ -245,6 +249,19 @@ defmodule PoopBagsWeb.API.ScanController do
           "scan #{scan.id} details expired by retention — summaries and directory aggregates remain"
       })
     end
+  end
+
+  # This service's own origin as the *caller* sees it — request scheme/host
+  # plus the configured URL path prefix — so generated links work identically
+  # from loopback, the house-name plane, and the phi path plane.
+  defp self_base(conn) do
+    port =
+      case conn.port do
+        p when p in [80, 443] -> ""
+        p -> ":#{p}"
+      end
+
+    "#{conn.scheme}://#{conn.host}#{port}#{Application.get_env(:poop_bags, :url_path, "")}"
   end
 
   defp coverage_ratio(nil), do: 0.0

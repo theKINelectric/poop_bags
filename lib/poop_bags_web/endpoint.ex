@@ -19,6 +19,35 @@ defmodule PoopBagsWeb.Endpoint do
   #
   # You should set gzip to true if you are running phx.digest
   # when deploying your static files in production.
+  # The app generates URLs under an optional path prefix (PHX_URL_PATH,
+  # e.g. /poopbags — the app's phi path-plane prefix), so its own links
+  # survive being served behind the door. Routing must then accept both
+  # shapes: the door strips the prefix before forwarding, but a link
+  # followed on the loopback/name plane arrives WITH it. This plug
+  # normalizes: an optional leading prefix moves into script_name (the
+  # scoping behaviour Phoenix expects) and the pipeline proceeds at the
+  # real path. With no prefix configured it does nothing. Sits before
+  # Plug.Static so /<prefix>/assets/... strips to the real files too.
+  plug :accept_url_path
+
+  defp accept_url_path(conn, _opts) do
+    prefix = Application.get_env(:poop_bags, :url_path, "") |> String.split("/", trim: true)
+
+    case prefix do
+      [] ->
+        conn
+
+      _ ->
+        case Enum.split(conn.path_info, length(prefix)) do
+          {^prefix, rest} ->
+            %{conn | script_name: conn.script_name ++ prefix, path_info: rest}
+
+          _ ->
+            conn
+        end
+    end
+  end
+
   plug Plug.Static,
     at: "/",
     from: :poop_bags,
