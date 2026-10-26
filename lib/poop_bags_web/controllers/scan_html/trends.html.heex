@@ -1,0 +1,143 @@
+<div class="scan-header">
+  <div>
+    <h1>Trends — {@scan.label || Path.basename(@scan.project_path)}</h1>
+    <p class="mono project-path">{@scan.project_path}</p>
+  </div>
+  <div class="scan-actions">
+    <.link href={~p"/scans/#{@scan.id}"} class="btn small">back to scan</.link>
+    <.link href={~p"/"} class="btn small">all scans</.link>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Scan timeline</h2>
+  <%= if @timeline == [] do %>
+    <p class="empty">No finished scans of this project yet — bag it twice to start a series.</p>
+  <% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Scan</th>
+            <th>Files</th>
+            <th>Functions</th>
+            <th>Violations</th>
+            <th>Worst</th>
+            <th>Avg</th>
+            <th>Threshold</th>
+            <th>Coverage</th>
+            <th>Flags</th>
+          </tr>
+        </thead>
+        <tbody>
+          <%= for entry <- @timeline do %>
+            <% scan = entry.scan %>
+            <tr>
+              <td class="mono">{format_when(scan)}</td>
+              <td class="mono"><.link href={~p"/scans/#{scan.id}"}>{scan.id}</.link></td>
+              <td class="mono">{scan.files_done}</td>
+              <td class="mono">{scan.functions_total}</td>
+              <td class="mono">{violations_of(scan)}</td>
+              <td class="mono">{scan.worst_crap}</td>
+              <td class="mono">{scan.avg_crap}</td>
+              <td class="mono">{scan.threshold || "–"}</td>
+              <td class="mono">{coverage_mix(scan)}</td>
+              <td class="timeline-flags">
+                <%= if scan.pinned do %>
+                  <span class="badge badge-pinned">📌</span>
+                <% end %>
+                <%= unless PoopBags.Catalog.Scan.details_available?(scan) do %>
+                  <span
+                    class="badge badge-expired"
+                    title="Detail findings expired by retention; summaries survive"
+                  >
+                    expired
+                  </span>
+                <% end %>
+              </td>
+            </tr>
+            <%= if entry.boundaries != [] do %>
+              <tr class="boundary-note">
+                <td colspan="10">
+                  <%= for note <- entry.boundaries do %>
+                    <span class="boundary-chip">⚠ {note}</span>
+                  <% end %>
+                  <span class="hint">
+                    series not comparable across this boundary — not a regression
+                  </span>
+                </td>
+              </tr>
+            <% end %>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</div>
+
+<div class="card">
+  <div class="lang-row">
+    <h2>Hotspot trend</h2>
+    <div class="lang-filters">
+      <%= for d <- @hotspot_depths do %>
+        <.link
+          href={~p"/scans/#{@scan.id}/trends?depth=#{d}"}
+          class={"lang-chip #{if d == @depth, do: "active", else: ""}"}
+        >
+          {d}-level
+        </.link>
+      <% end %>
+    </div>
+  </div>
+
+  <%= if @matrix == [] do %>
+    <p class="empty">
+      No directory aggregates at this depth yet — scans made before hotspots existed have none;
+      bag the project again.
+    </p>
+  <% else %>
+    <div class="table-scroll">
+      <table class="table trend-table">
+        <thead>
+          <tr>
+            <th class="dir-head">Directory</th>
+            <%= for s <- @scans do %>
+              <th>
+                <.link href={~p"/scans/#{s.id}"}>{s.id}</.link>
+                <span class="th-sub">{format_when(s)}</span>
+              </th>
+            <% end %>
+          </tr>
+        </thead>
+        <tbody>
+          <%= for row <- @matrix do %>
+            <tr>
+              <td class="mono where-cell" title={row.path}>{row.path}</td>
+              <%= for cell <- row.cells do %>
+                <%= if cell do %>
+                  <td class="trend-cell">
+                    <div
+                      class="trend-bar"
+                      style={"width: #{bar_percent(cell.crap_excess, @max_excess)}%"}
+                    >
+                    </div>
+                    <span class="trend-value">{cell.crap_excess}</span>
+                    <span class="trend-sub">{cell.violations} viol · {cell.functions} fn</span>
+                  </td>
+                <% else %>
+                  <td class="mono dim">–</td>
+                <% end %>
+              <% end %>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">
+      Bars scale to the worst cell in view; cells show CRAP-excess (Σ max(CRAP − threshold, 0))
+      with violations · functions. “–” = the directory didn't exist or wasn't aggregated in that
+      scan. These aggregates survive detail expiry — the trend outlives the findings.
+    </p>
+  <% end %>
+</div>

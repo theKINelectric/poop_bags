@@ -1,0 +1,240 @@
+<div class="scan-header">
+  <div>
+    <h1>{@scan.label || Path.basename(@scan.project_path)}</h1>
+    <p class="mono project-path">{@scan.project_path}</p>
+  </div>
+  <div class="scan-actions">
+    <span class={"status status-#{@scan.status}"}>{@scan.status}</span>
+    <%= if @scan.pinned do %>
+      <span class="badge badge-pinned" title="Pinned — retention keeps this scan's details">
+        📌 pinned
+      </span>
+    <% end %>
+    <.link href={~p"/scans/#{@scan.id}/trends"} class="btn small">trends</.link>
+    <.link href={~p"/"} class="btn small">all scans</.link>
+    <%= unless PoopBags.Catalog.Scan.running?(@scan) do %>
+      <form action={~p"/scans/#{@scan.id}/pin"} method="post" class="inline-form">
+        <button type="submit" class="btn small">
+          {if @scan.pinned, do: "unpin", else: "pin"}
+        </button>
+      </form>
+      <form action={~p"/scans/#{@scan.id}/delete"} method="post" class="inline-form">
+        <button type="submit" class="btn small danger">delete</button>
+      </form>
+    <% end %>
+  </div>
+</div>
+
+<%= if PoopBags.Catalog.Scan.running?(@scan) do %>
+  <meta http-equiv="refresh" content="2" />
+  <div class="card progress-card">
+    <h2>On the belts…</h2>
+    <div class="progress-bar">
+      <div class="progress-fill" style={"width: #{progress_percent(@scan)}%"}></div>
+    </div>
+    <p class="mono">
+      {@scan.files_done} / {@scan.files_total} files · {@scan.files_failed} failed
+    </p>
+  </div>
+<% end %>
+
+<%= if @scan.status == "error" do %>
+  <div class="card error-card">
+    <h2>The bag split</h2>
+    <pre class="mono"><%= @scan.error %></pre>
+  </div>
+<% end %>
+
+<%= if @scan.status == "done" do %>
+  <div class="stats-grid">
+    <div class="card stat">
+      <div class="stat-value mono">{@scan.files_done}</div>
+      <div class="stat-label">files bagged</div>
+      <div class="stat-sub mono">{@scan.files_failed} failed · {@scan.files_skipped} skipped</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value mono">{@scan.functions_total}</div>
+      <div class="stat-label">functions measured</div>
+      <div class="stat-sub mono">{coverage_provenance(@scan)}</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value mono">⚠️ {@scan.worst_crap}</div>
+      <div class="stat-label">worst CRAP</div>
+      <div class="stat-sub">{@band_label.(@band.(@scan.worst_crap))}</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value mono">{@scan.avg_crap}</div>
+      <div class="stat-label">average CRAP</div>
+      <div class="stat-sub mono">formula: comp²(1−cov)³+comp</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="lang-row">
+      <h2>Specimens, worst first</h2>
+      <div class="lang-filters">
+        <.link
+          href={~p"/scans/#{@scan.id}"}
+          class={"lang-chip #{if is_nil(@conn.params["language"]), do: "active", else: ""}"}
+        >
+          all
+        </.link>
+        <%= for lang <- @languages do %>
+          <.link
+            href={~p"/scans/#{@scan.id}?language=#{lang}"}
+            class={"lang-chip lang-#{lang} #{if @conn.params["language"] == lang, do: "active", else: ""}"}
+          >
+            {lang}
+          </.link>
+        <% end %>
+      </div>
+    </div>
+
+    <%= if not PoopBags.Catalog.Scan.details_available?(@scan) do %>
+      <p class="empty">
+        Per-function details were expired by retention on {@scan.details_expired_at} —
+        the summary, hotspots, and manifest survive. Diffs and explanations need details:
+        pin a scan to protect it.
+      </p>
+    <% else %>
+      <%= if @findings == [] do %>
+        <p class="empty">No findings — either nothing stinks or the filter is too tight.</p>
+      <% else %>
+        <table class="table findings">
+          <thead>
+            <tr>
+              <th>CRAP</th>
+              <th>Stench</th>
+              <th>cx</th>
+              <th>Language</th>
+              <th>Function</th>
+              <th>Where</th>
+            </tr>
+          </thead>
+          <tbody>
+            <%= for finding <- @findings do %>
+              <% band = @band.(finding.crap) %>
+              <tr>
+                <td class="mono crap-cell">
+                  <.link href={~p"/scans/#{@scan.id}/explain?finding=#{finding.id}"}>
+                    {finding.crap}
+                  </.link>
+                </td>
+                <td><span class={"badge badge-#{band}"}>{@band_label.(band)}</span></td>
+                <td class="mono">{finding.complexity}</td>
+                <td>
+                  <span class={"lang-chip lang-#{finding.language} mini"}>
+                    {finding.language}
+                  </span>
+                </td>
+                <td class="function-cell">
+                  <span class="fn-name mono">{finding.function_name}</span>
+                  <%= if finding.module_name != "" do %>
+                    <span class="fn-module">in {finding.module_name}</span>
+                  <% end %>
+                </td>
+                <td class="where-cell mono" title={finding.path}>
+                  {finding.path}:{finding.line}
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    <% end %>
+  </div>
+
+  <div class="card language-breakdown">
+    <h2>By language</h2>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Language</th>
+          <th>Files</th>
+          <th>Functions</th>
+          <th>Crap sum</th>
+          <th>Avg</th>
+        </tr>
+      </thead>
+      <tbody>
+        <%= for {lang, s} <- language_stats(@scan) do %>
+          <tr>
+            <td><span class={"lang-chip lang-#{lang} mini"}>{lang}</span></td>
+            <td class="mono">{s["files"]}</td>
+            <td class="mono">{s["functions"]}</td>
+            <td class="mono">{s["crap_sum"]}</td>
+            <td class="mono">
+              {if s["functions"] > 0, do: Float.round(s["crap_sum"] / s["functions"], 2), else: 0}
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    <p class="hint">
+      Scoring policy: <span class="mono">{@scan.stats["policy"]}</span>
+      · violation threshold: CRAP &gt; {@scan.threshold || 20.0}{config_note(@scan)} · violations:
+      <span class="mono">{violations_of(@scan)}</span>
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="lang-row">
+      <h2>Directory hotspots</h2>
+      <div class="lang-filters">
+        <%= for d <- @hotspot_depths do %>
+          <.link
+            href={~p"/scans/#{@scan.id}?depth=#{d}"}
+            class={"lang-chip #{if d == @hotspot_depth, do: "active", else: ""}"}
+          >
+            {d}-level
+          </.link>
+        <% end %>
+        <.link href={~p"/scans/#{@scan.id}/trends?depth=#{@hotspot_depth}"} class="btn small">
+          trend these →
+        </.link>
+      </div>
+    </div>
+
+    <%= if @hotspots == [] do %>
+      <p class="empty">No directory aggregates — this scan predates hotspots.</p>
+    <% else %>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Directory</th>
+            <th>Files</th>
+            <th>Functions</th>
+            <th>Violations</th>
+            <th>Rate</th>
+            <th>Worst CRAP</th>
+            <th>CRAP-excess</th>
+            <th>Excess/fn</th>
+            <th>Measured</th>
+          </tr>
+        </thead>
+        <tbody>
+          <%= for dir <- Enum.take(@hotspots, 15) do %>
+            <tr>
+              <td class="mono where-cell" title={dir.path}>{dir.path}</td>
+              <td class="mono">{dir.files}</td>
+              <td class="mono">{dir.functions}</td>
+              <td class="mono">{dir.violations}</td>
+              <td class="mono">{violation_rate(dir)}</td>
+              <td class="mono">{dir.worst_crap}</td>
+              <td class="mono crap-cell">{dir.crap_excess}</td>
+              <td class="mono">{excess_per_function(dir)}</td>
+              <td class="mono">{measured_share(dir)}</td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+      <p class="hint">
+        CRAP-excess = Σ max(CRAP − threshold, 0) — the above-threshold burden, worst-first.
+        It grows with directory size on purpose; the violation rate makes differently sized
+        directories comparable. Aggregates survive detail expiry, feeding the <.link href={
+          ~p"/scans/#{@scan.id}/trends"
+        }>trends page</.link>.
+      </p>
+    <% end %>
+  </div>
+<% end %>

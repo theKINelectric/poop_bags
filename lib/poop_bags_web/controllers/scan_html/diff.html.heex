@@ -1,0 +1,125 @@
+<div class="scan-header">
+  <div>
+    <h1>Diff: scan #{@diff.current.id} vs #{@diff.baseline.id}</h1>
+    <p class="mono project-path">{@scan.project_path}</p>
+  </div>
+  <div class="scan-actions">
+    <span class={"status #{if @diff.comparable, do: "status-done", else: "status-error"}"}>
+      {if @diff.comparable, do: "comparable", else: "read with care"}
+    </span>
+    <.link href={~p"/scans/#{@scan.id}"} class="btn small">scan page</.link>
+  </div>
+</div>
+
+<%= if @diff.comparable == false do %>
+  <div class="card error-card">
+    <h2>Comparability warnings</h2>
+    <ul>
+      <%= for warning <- @diff.warnings do %>
+        <li>{warning}</li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<div class="stats-grid">
+  <div class="card stat">
+    <div class="stat-value mono">{@diff.summary.introduced}</div>
+    <div class="stat-label">introduced</div>
+    <div class="stat-sub">new functions in this scan</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-value mono">{@diff.summary.regressed}</div>
+    <div class="stat-label">regressed</div>
+    <div class="stat-sub">CRAP went up</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-value mono">{@diff.summary.resolved}</div>
+    <div class="stat-label">resolved</div>
+    <div class="stat-sub">back under threshold ({@diff.threshold})</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-value mono">{@diff.summary.improved}</div>
+    <div class="stat-label">improved</div>
+    <div class="stat-sub">CRAP went down</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-value mono">{@diff.summary.removed}</div>
+    <div class="stat-label">removed</div>
+    <div class="stat-sub">gone since baseline</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="lang-row">
+    <h2>What changed</h2>
+    <div class="lang-filters">
+      <.link
+        href={~p"/scans/#{@scan.id}/diff?against=#{@diff.baseline.id}"}
+        class={"lang-chip #{if not is_nil(@conn.params["outcome"]), do: "", else: "active"}"}
+      >
+        all
+      </.link>
+      <%= for outcome <- ~w(introduced regressed resolved improved removed) do %>
+        <.link
+          href={~p"/scans/#{@scan.id}/diff?against=#{@diff.baseline.id}&outcome=#{outcome}"}
+          class={"lang-chip #{if @conn.params["outcome"] == outcome, do: "active", else: ""}"}
+        >
+          {outcome} {@diff.summary[String.to_existing_atom(outcome)]}
+        </.link>
+      <% end %>
+    </div>
+  </div>
+
+  <%= if @rows == [] do %>
+    <p class="empty">Nothing moved. The bag smells the same as yesterday.</p>
+  <% else %>
+    <table class="table findings">
+      <thead>
+        <tr>
+          <th>Outcome</th>
+          <th>ΔCRAP</th>
+          <th>Δcx</th>
+          <th>Baseline → Current</th>
+          <th>Function</th>
+          <th>Where</th>
+        </tr>
+      </thead>
+      <tbody>
+        <%= for row <- @rows do %>
+          <% {_lang, path, module, fun} = row.identity %>
+          <tr>
+            <td>
+              <span class={"badge badge-outcome-#{row.outcome}"}>
+                {row.outcome}{if row.violation, do: " ⚠️"}
+              </span>
+            </td>
+            <td class={"mono #{if row.delta_crap > 0, do: "crap-worse", else: "crap-better"}"}>
+              {format_delta(row.delta_crap)}
+            </td>
+            <td class="mono">{format_delta(row.delta_complexity)}</td>
+            <td class="mono">
+              <%= cond do %>
+                <% row.baseline && row.current -> %>
+                  {row.baseline.crap} → {row.current.crap}
+                <% row.baseline -> %>
+                  was {row.baseline.crap}
+                <% true -> %>
+                  new ({row.current.crap})
+              <% end %>
+            </td>
+            <td class="function-cell">
+              <span class="fn-name mono">{fun}</span>
+              <%= if module != "" do %>
+                <span class="fn-module">in {module}</span>
+              <% end %>
+            </td>
+            <td class="where-cell mono" title={path}>
+              {if row.current, do: "#{path}:#{row.current.line}", else: path}
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</div>
