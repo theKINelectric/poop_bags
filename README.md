@@ -2,7 +2,7 @@
 
 A standalone web service that takes a local project directory and **bags the CRAP** — **C**hange **R**isk **A**nti-**P**atterns — function by function. Then it tells you whether your refactor actually cleaned anything up.
 
-Built with **Phoenix** + **[FlowExtra](https://codeberg.org/kin_electric/flow_extra)** (the Flowex fork's GenStage railway pipelines) + **SQLite**. Works on **Elixir, Zig, Kotlin, and Swift**. Developed by **🛸🕳️ iStellar~iModal**.
+Built with **Phoenix** + **[FlowExtra](https://codeberg.org/kin_electric/flow_extra)** (the Flowex fork's GenStage railway pipelines) + **SQLite**. Works on **Elixir, Zig, Kotlin, Swift, and Rust**. Developed by **🛸🕳️ iStellar~iModal**.
 
 ```
 CRAP(m) = complexity(m)² × (1 − coverage(m))³ + complexity(m)
@@ -104,7 +104,7 @@ walker ──▶ Engine ──▶ FlowExtra pipeline (GenStage belts, admission-
                                                         └── any raise → error_pipe: bag_the_mess
 ```
 
-- `PoopBags.Walker` collects source files (extension whitelist: `.ex .exs .zig .kt .kts .swift`; skips `.git`, `deps`, `node_modules`, `_build`, caches, `vendor`, …; 30k-file and 1.5MB-per-file caps, everything skipped is counted) — now with `.poopbags.json` exclusions and language filters.
+- `PoopBags.Walker` collects source files (extension whitelist: `.ex .exs .zig .kt .kts .swift .rs`; skips `.git`, `deps`, `node_modules`, `_build`, caches, `vendor`, …; 30k-file and 1.5MB-per-file caps, everything skipped is counted) — now with `.poopbags.json` exclusions and language filters.
 - `PoopBags.Engine` is the one place a scan happens: config resolution, walker, coverage ingestion and alignment, the FlowExtra belt driven from an unlinked task pool (one bad file is one failed file, never a dead runner), per-file content hashing, and an all-or-nothing transaction committing findings + file manifest + directory aggregates + summary. The web `ScanRunner` and the CI task are both thin shells over it.
 - Findings carry line spans, per-function coverage + provenance, and the manifest records every file's sha256 — the snapshot identity coverage attribution and future caching lean on.
 - `PoopBags.Retention` expires old scans' details after each commit and at boot; `PoopBags.Hotspots` builds the durable per-directory aggregates that survive expiry.
@@ -117,18 +117,18 @@ walker ──▶ Engine ──▶ FlowExtra pipeline (GenStage belts, admission-
 - `quote` blocks are pruned (that's generated code, not this code).
 - Parsing is **atom-safe** (`static_atoms_encoder`): scanning foreign projects for months cannot grow the atom table.
 
-**Zig / Kotlin / Swift** get a token analyzer, since no resident compiler exists for them:
-1. `PoopBags.SourceCleaner` blanks comments and string/char literals with **byte-length and newline preservation** — handles Zig multiline `\\` literals, Kotlin `"""` + nested block comments + `${}` interpolation, Swift `"""`, `#"raw"#` strings and `\()` interpolation.
-2. Function declarations are regex-located; body spans come from brace matching, **bounded by the next declaration** so bodyless declarations (Swift protocol requirements, `extern fn`, `external fun`, inline Zig error sets) never borrow a neighbor's body. Kotlin expression bodies (`fun f() = expr`) span to the statement end.
-3. Branch tokens (`if`, `while`, `for`, `catch`, `orelse`/`?:`/`??`, `&&`, `||`, switch prongs / `when` arms / `case:` arms, Swift `guard`/`where`/ternary) are matched once and attributed to the **innermost** function span — nested/local functions never double-count.
+**Zig / Kotlin / Swift / Rust** get a token analyzer, since no resident compiler exists for them:
+1. `PoopBags.SourceCleaner` blanks comments and string/char literals with **byte-length and newline preservation** — handles Zig multiline `\\` literals, Kotlin `"""` + nested block comments + `${}` interpolation, Swift `"""`, `#"raw"#` strings and `\()` interpolation, and Rust `r#"raw"#` strings (the close is `"` plus the opening count of `#`s), nested block comments, and multiline `"..."` literals. Rust `'a`-style lifetimes/labels are told apart from `'x'` char literals by whether the identifier run ends at a closing quote.
+2. Function declarations are regex-located; body spans come from brace matching, **bounded by the next declaration** so bodyless declarations (Swift protocol requirements, `extern fn`, `external fun`, Rust trait signatures, inline Zig error sets) never borrow a neighbor's body. Kotlin expression bodies (`fun f() = expr`) span to the statement end.
+3. Branch tokens (`if`, `while`, `for`, `loop`, `catch`, `orelse`/`?:`/`??`, `&&`, `||`, switch prongs / `when` arms / `case:` arms / `match` arms, Swift `guard`/`where`/ternary, Rust `?`) are matched once and attributed to the **innermost** function span — nested/local functions never double-count.
 4. `complexity = 1 + tokens`. Exhaustive choices count one per arm (not the keyword), matching the Elixir `case` policy.
 
-Known approximations (consistent and documented, not claimed to be exact): Kotlin `->` after a `)` is read as a function type rather than a `when` arm (and a lambda's `->` counts as a branch); Swift `case` inside enum declarations nested in functions counts, and `try? f(x: 1)` can masquerade as a ternary; accessors (`get`/`set`), Kotlin `init` blocks, and Zig `test` blocks are not reported as functions. Elixir reports one finding per clause (clause-heavy functions read hotter), and `def`/`defmacro` of the same name share a clause-number series. The four languages share one policy for exhaustive choices and conditional fallbacks, so cross-language rankings are comparable in spirit, not numerically identical.
+Known approximations (consistent and documented, not claimed to be exact): Kotlin `->` after a `)` is read as a function type rather than a `when` arm (and a lambda's `->` counts as a branch); Swift `case` inside enum declarations nested in functions counts, and `try? f(x: 1)` can masquerade as a ternary; Rust `=>` counts `macro_rules!` arms alongside `match` arms, `||` after `=`/`(`/`,`/`{`/`=>`/`return`/`move` is read as empty-parameter closure syntax rather than boolean-or (and a `||` whose left operand was a blanked literal is missed), and `?` in `?Sized` bounds does not count; accessors (`get`/`set`), Kotlin `init` blocks, and Zig `test` blocks are not reported as functions. Elixir reports one finding per clause (clause-heavy functions read hotter), and `def`/`defmacro` of the same name share a clause-number series. The five languages share one policy for exhaustive choices and conditional fallbacks, so cross-language rankings are comparable in spirit, not numerically identical.
 
 ## Verifying it works
 
 ```console
-$ mix test          # 129 tests: formula, cleaner, analyzers, walker, pipeline, web, diff, coverage, CI,
+$ mix test          # 153 tests: formula, cleaner, analyzers, walker, pipeline, web, diff, coverage, CI,
                     # hotspots, retention, trends — and the full acceptance scenario:
                     # config+coverage scan → refactor → diff → CI agreement
 ```

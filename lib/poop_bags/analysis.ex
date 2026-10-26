@@ -10,10 +10,10 @@ defmodule PoopBags.Analysis do
   alias PoopBags.ElixirAnalyzer
   alias PoopBags.TokenAnalyzer
 
-  @spec analyze(binary(), :elixir | :zig | :kotlin | :swift) ::
+  @spec analyze(binary(), :elixir | :zig | :kotlin | :swift | :rust) ::
           {:ok, [Finding.t()]} | {:error, :parse}
   def analyze(source, :elixir), do: ElixirAnalyzer.analyze(source)
 
-  def analyze(source, lang) when lang in [:zig, :kotlin, :swift],
+  def analyze(source, lang) when lang in [:zig, :kotlin, :swift, :rust],
     do: {:ok, TokenAnalyzer.analyze(source, lang)}
 end

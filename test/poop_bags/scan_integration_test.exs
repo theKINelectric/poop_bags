@@ -3,6 +3,7 @@ defmodule PoopBags.ScanIntegrationTest do
 
   import Ecto.Query
   alias PoopBags.Catalog
+  alias PoopBags.Diff
   alias PoopBags.Repo
   alias PoopBags.ScanSupervisor
 
@@ -115,6 +116,89 @@ defmodule PoopBags.ScanIntegrationTest do
       Repo.aggregate(from(f in PoopBags.Catalog.Finding, where: f.scan_id == ^scan.id), :count)
 
     assert findings == 0
+  end
+
+  @tag :tmp_dir
+  test "a rust project scans, diffs and gates through the real pipeline", ctx do
+    root = ctx.tmp_dir
+    File.mkdir_p!(Path.join(root, "src"))
+    File.write!(Path.join(root, "Cargo.toml"), "[package]\nname = \"fixture\"\n")
+
+    File.write!(Path.join(root, "src/lib.rs"), """
+    impl Greeter {
+        fn greet(&self, name: &str) -> String {
+            if name.is_empty() {
+                String::from("anon")
+            } else {
+                format!("{}", name)
+            }
+        }
+    }
+
+    fn classify(x: i32) -> i32 {
+        match x {
+            n if n < 0 => -1,
+            0 => 0,
+            _ => 1,
+        }
+    }
+    """)
+
+    {:ok, scan} = Catalog.create_scan(%{"project_path" => root, "label" => "rust run"})
+    assert :ok = ScanSupervisor.start_scan(scan.id)
+    scan = await_done!(scan.id)
+
+    assert scan.status == "done"
+    assert scan.files_done == 1
+
+    findings = Catalog.top_findings(scan, limit: 100) |> Enum.filter(&(&1.language == "rust"))
+
+    assert Enum.map(findings, &{&1.function_name, &1.complexity}) |> Enum.sort() ==
+             [{"classify", 5}, {"greet", 2}]
+
+    assert Enum.find(findings, &(&1.function_name == "greet")).module_name == "Greeter"
+    assert scan.stats["rust"]["functions"] == 2
+
+    # a rust regression trips the diff gate like any other language
+    File.write!(Path.join(root, "src/lib.rs"), """
+    impl Greeter {
+        fn greet(&self, name: &str) -> String {
+            if name.is_empty() {
+                String::from("anon")
+            } else {
+                format!("{}", name)
+            }
+        }
+    }
+
+    fn classify(x: i32) -> i32 {
+        match x {
+            n if n < 0 => -1,
+            0 => 0,
+            _ => 1,
+        }
+    }
+
+    fn rotten(x: i32) -> i32 {
+        if x > 0 {
+            if x > 10 {
+                if x > 100 { if x > 1000 { if x > 10_000 { 5 } else { 4 } } else { 3 } }
+            } else {
+                2
+            }
+        } else {
+            1
+        }
+    }
+    """)
+
+    {:ok, scan2} = Catalog.create_scan(%{"project_path" => root, "label" => "rust rerun"})
+    assert :ok = ScanSupervisor.start_scan(scan2.id)
+    scan2 = await_done!(scan2.id)
+
+    diff = Diff.between(scan, scan2)
+    assert Diff.gate_failures(diff) != []
+    refute Diff.gate_passed?(diff)
   end
 
   test "deleting a scan removes its findings" do

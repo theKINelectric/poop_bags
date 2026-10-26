@@ -12,6 +12,7 @@ defmodule PoopBags.WalkerTest do
     write(root, "app/three.kt", "fun three() = 1\n")
     write(root, "ios/four.swift", "func four() {}\n")
     write(root, "scripts/five.exs", "IO.puts(:hi)\n")
+    write(root, "crate/six.rs", "fn six() {}\n")
     write(root, "notes/readme.md", "nope")
     write(root, "node_modules/pkg/six.js", "junk")
     write(root, ".git/HEAD", "junk")
@@ -23,6 +24,7 @@ defmodule PoopBags.WalkerTest do
 
     assert rels == [
              "app/three.kt",
+             "crate/six.rs",
              "ios/four.swift",
              "lib/one.ex",
              "scripts/five.exs",
@@ -30,7 +32,7 @@ defmodule PoopBags.WalkerTest do
            ]
 
     langs = files |> Enum.map(& &1.language) |> Enum.sort()
-    assert langs == [:elixir, :elixir, :kotlin, :swift, :zig]
+    assert langs == [:elixir, :elixir, :kotlin, :rust, :swift, :zig]
   end
 
   @tag :tmp_dir

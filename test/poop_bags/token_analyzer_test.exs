@@ -328,4 +328,207 @@ defmodule PoopBags.TokenAnalyzerTest do
       assert complexity_of(analyze(src, :swift), "f") == 1
     end
   end
+
+  describe "rust" do
+    test "if/for/while/loop/&&/||/? counted; else not" do
+      src = """
+      fn transform(input: &[u8]) -> Result<usize, Error> {
+          if input.len() > 10 {
+              return Err(Error::TooLarge);
+          }
+          let mut i = 0;
+          while i < input.len() {
+              if input[i] == b'\\r' && i + 1 < input.len() {
+                  i += 1;
+              }
+          }
+          let x = lookup(input).or_else(fallback)?;
+          let y = if i > 0 { i } else { 0 };
+          for _ in 0..x {
+              loop {
+                  if done() { break; }
+              }
+          }
+          Ok(i)
+      }
+      """
+
+      # if, while, if, &&, ?, if, for, loop, if = 9 → complexity 10
+      findings = analyze(src, :rust)
+      assert complexity_of(findings, "transform") == 10
+    end
+
+    test "match counts arms, not the keyword" do
+      src = """
+      fn pick(x: u8) -> char {
+          match x {
+              1 => 'a',
+              2 | 3 => 'b',
+              _ => 'z',
+          }
+      }
+      """
+
+      # `|` or-patterns are single pipes — only the three `=>` arms count
+      assert complexity_of(analyze(src, :rust), "pick") == 4
+    end
+
+    test "match guards contribute their if" do
+      src = """
+      fn f(x: i32) -> i32 {
+          match x {
+              n if n > 0 => 1,
+              _ => 0,
+          }
+      }
+      """
+
+      # 2 arms + guard if = 3 → complexity 4
+      assert complexity_of(analyze(src, :rust), "f") == 4
+    end
+
+    test "comments, strings and raw strings never counted" do
+      src = ~S"""
+      /// doc: if (x) while (y)
+      fn f() -> i32 {
+          // if (a) && (b)
+          let s = "for (i) => loop";
+          let r = r#"if (z) || w =>"#;
+          let r2 = r##"raw "quoted" still raw"##;
+          /* nested /* if */ comment => */
+          0
+      }
+      """
+
+      assert complexity_of(analyze(src, :rust), "f") == 1
+    end
+
+    test "lifetimes don't eat the signature or the body" do
+      src = """
+      fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+          if x.len() > y.len() {
+              x
+          } else {
+              y
+          }
+      }
+
+      fn tick(c: char) -> bool {
+          c.is_ascii() || c == 'x'
+      }
+      """
+
+      findings = analyze(src, :rust)
+      assert complexity_of(findings, "longest") == 2
+      assert complexity_of(findings, "tick") == 2
+    end
+
+    test "empty-parameter closures don't count as boolean or" do
+      src = """
+      fn f(xs: Vec<i32>) -> Vec<i32> {
+          let d = xs.iter().max().unwrap_or_else(|| 0);
+          let g = move || xs.len();
+          xs.iter().map(|x| x * 2).filter(|x| *x > 0).collect()
+      }
+      """
+
+      assert complexity_of(analyze(src, :rust), "f") == 1
+    end
+
+    test "boolean or counts" do
+      src = """
+      fn f(a: bool, b: bool) -> bool {
+          if a || b { true } else { false }
+      }
+      """
+
+      # if + || = 2 → complexity 3
+      assert complexity_of(analyze(src, :rust), "f") == 3
+    end
+
+    test "try operator counts, ?Sized bounds don't" do
+      src = """
+      fn load<T: ?Sized>() -> Result<u8, Err> {
+          let v = read()?;
+          let w = v.checked_add(1).ok_or(Err::Math)?;
+          Ok(w)
+      }
+      """
+
+      assert complexity_of(analyze(src, :rust), "load") == 3
+    end
+
+    test "trait signatures get no body" do
+      src = """
+      trait Repo {
+          fn find(&self, id: u64) -> u64;
+          fn name(&self) -> &str;
+      }
+      fn real() {}
+      """
+
+      findings = analyze(src, :rust)
+      assert Enum.map(findings, & &1.function_name) == ["real"]
+    end
+
+    test "impl groups methods under the implemented type" do
+      src = """
+      struct Point { x: i32 }
+
+      impl Point {
+          fn shift(&mut self, dx: i32) {
+              if dx > 0 { self.x += dx; }
+          }
+      }
+
+      impl Display for Point {
+          fn fmt(&self) -> String {
+              format!("{}", self.x)
+          }
+      }
+      """
+
+      findings = analyze(src, :rust)
+      assert Enum.find(findings, &(&1.function_name == "shift")).module_name == "Point"
+      assert Enum.find(findings, &(&1.function_name == "fmt")).module_name == "Point"
+    end
+
+    test "generics and fn-pointer types don't create phantom functions" do
+      src = """
+      type Callback = fn(i32) -> i32;
+      fn apply<T, const N: usize>(f: Callback, xs: [T; N]) -> i32 {
+          if N > 0 { f(0) } else { 0 }
+      }
+      """
+
+      findings = analyze(src, :rust)
+      assert Enum.map(findings, & &1.function_name) == ["apply"]
+      assert complexity_of(findings, "apply") == 2
+    end
+
+    test "nested functions don't double count" do
+      src = """
+      fn outer() {
+          fn helper(x: u32) -> u32 {
+              if x > 1 { x } else { 0 }
+          }
+          let _ = helper;
+      }
+      """
+
+      findings = analyze(src, :rust)
+      assert complexity_of(findings, "outer") == 1
+      assert complexity_of(findings, "helper") == 2
+    end
+
+    test "mod declarations without bodies don't swallow" do
+      src = """
+      mod sibling;
+      fn top() { if true {} }
+      """
+
+      findings = analyze(src, :rust)
+      assert Enum.find(findings, &(&1.function_name == "top")).module_name == ""
+    end
+  end
 end

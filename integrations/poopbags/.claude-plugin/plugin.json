@@ -1,0 +1,6 @@
+{
+  "name": "poopbags",
+  "version": "0.1.0",
+  "author": { "name": "Poop Bags contributors" },
+  "description": "Advisory CRAP-score hook: edits mark the project dirty; at a stop boundary a debounced, fingerprinted scan reports clean/actionable/unknown without ever blocking. Native Mods form, per licorice's being-memory precedent."
+}

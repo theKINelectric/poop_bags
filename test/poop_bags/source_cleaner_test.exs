@@ -107,6 +107,57 @@ defmodule PoopBags.SourceCleanerTest do
     end
   end
 
+  describe "rust" do
+    test "nested block comments" do
+      src = "/* outer /* inner if (x) */ still comment */ let y = 1"
+      out = clean(src, :rust)
+      assert byte_size(out) == byte_size(src)
+      refute out =~ "if"
+      assert out =~ "let y = 1"
+    end
+
+    test "raw strings blanked, including embedded quotes and #" do
+      src = ~s|let s = r#"if "quoted" => still"#; let t = 2|
+      out = clean(src, :rust)
+      assert byte_size(out) == byte_size(src)
+      refute out =~ "if"
+      refute out =~ "=>"
+      assert out =~ "let t = 2"
+    end
+
+    test "raw string with two hashes, content carrying one" do
+      src = ~s|let s = r##"a "still raw"# body"##; f()|
+      out = clean(src, :rust)
+      assert byte_size(out) == byte_size(src)
+      refute out =~ "still raw"
+      assert out =~ "f()"
+    end
+
+    test "plain r-string closes on the first quote" do
+      src = ~s|let s = r"if (x)"; f()|
+      out = clean(src, :rust)
+      refute out =~ "if"
+      assert out =~ "f()"
+    end
+
+    test "lifetimes stay, char literals blank" do
+      src = "fn f<'a>(x: &'a str) -> char { 'x' }"
+      out = clean(src, :rust)
+      assert byte_size(out) == byte_size(src)
+      assert out =~ "fn f<'a>(x: &'a str)"
+      refute out =~ "'x'"
+    end
+
+    test "multiline strings span newlines" do
+      src = "let s = \"line one\nif (x) line two\";\nfn f() {}"
+      out = clean(src, :rust)
+      assert byte_size(out) == byte_size(src)
+      refute out =~ "if"
+      assert out =~ "fn f()"
+      assert newline_positions(out) == newline_positions(src)
+    end
+  end
+
   defp newline_positions(bin) do
     :binary.matches(bin, "\n") |> Enum.map(fn {p, _} -> p end)
   end

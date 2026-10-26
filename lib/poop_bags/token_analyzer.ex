@@ -1,7 +1,7 @@
 defmodule PoopBags.TokenAnalyzer do
   @moduledoc """
-  Brace-tracking, token-counting complexity analyzer for Zig, Kotlin, and
-  Swift — the languages we can't parse with the resident compiler.
+  Brace-tracking, token-counting complexity analyzer for Zig, Kotlin,
+  Swift, and Rust — the languages we can't parse with the resident compiler.
 
   Method, per file:
 
@@ -24,6 +24,15 @@ defmodule PoopBags.TokenAnalyzer do
     Elixir analyzer counts `case` clauses;
   * Kotlin `->` after a `)` is treated as a function type (`(Int) -> Int`),
     not a `when` arm — a documented approximation;
+  * Rust `=>` counts match arms and `macro_rules!` arms alike (both are
+    choice arms);
+  * Rust `||` counts as boolean-or only when an operand precedes it — after
+    `= ( , [ { ; : > ! | &`, or after `return`/`move`/`in`, it is the
+    empty-parameter closure `|| expr`. A `||` whose left operand was a
+    blanked literal (`s == "x" || y` reads as `s == || y`) is a documented
+    false-negative;
+  * Rust `?` counts the try operator; a `?` followed by an identifier is a
+    `?Sized`-style trait bound and does not count;
   * one per conditional fallback: `orelse`, `?:`, `??`.
 
   It is an approximation by construction — but a consistent one, which is
@@ -38,14 +47,23 @@ defmodule PoopBags.TokenAnalyzer do
     kotlin:
       ~r/\bfun\s+(?:<(?:[^<>]|<[^<>]*>)*>\s+)?(?:[A-Za-z_][A-Za-z0-9_.]*(?:<[^<>]*>)?\.)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(/,
     swift:
-      ~r"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*|[=!<>+\-*/%&|^~]{1,3})\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(|(?<![\w.])init\s*[?!]?\s*\("
+      ~r"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*|[=!<>+\-*/%&|^~]{1,3})\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(|(?<![\w.])init\s*[?!]?\s*\(",
+    rust: ~r/\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:<(?:[^<>]|<[^<>]*>)*>)?\s*\(/
   }
 
+  # A list per language; Rust `impl` groups methods under the type they
+  # implement (or the `for` target), a container the other languages fold
+  # into their single pattern.
   @module_patterns %{
-    zig:
-      ~r/([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:packed\s+|extern\s+)?(?:struct|union|enum|opaque)\b/,
-    kotlin: ~r/\b(?:class|object|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/,
-    swift: ~r/\b(?:class|struct|enum|extension|actor|protocol)\s+([A-Za-z_][A-Za-z0-9_]*)/
+    zig: [
+      ~r/([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:packed\s+|extern\s+)?(?:struct|union|enum|opaque)\b/
+    ],
+    kotlin: [~r/\b(?:class|object|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/],
+    swift: [~r/\b(?:class|struct|enum|extension|actor|protocol)\s+([A-Za-z_][A-Za-z0-9_]*)/],
+    rust: [
+      ~r/\b(?:struct|enum|trait|union|mod)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      ~r/\bimpl(?:<[^<>]*>)?\s+(?:(?:!?\s*[A-Za-z_][A-Za-z0-9_:<>]*)\s+for\s+)?([A-Za-z_][A-Za-z0-9_]*)/
+    ]
   }
 
   # Each entry is `{label, pattern}` (labels power the explain view) or the
@@ -88,12 +106,22 @@ defmodule PoopBags.TokenAnalyzer do
       # ternary `c ? a : b` — not `??`/`?.`, not an optional-type `T? =`,
       # and never crossing a newline.
       {"ternary ?:", ~r/\?(?![?.])(?!\s*=)[^\n?:]*:/}
+    ],
+    rust: [
+      {"if", ~r/\bif\b/},
+      {"for", ~r/\bfor\b/},
+      {"while", ~r/\bwhile\b/},
+      {"loop", ~r/\bloop\b/},
+      {"match arm", ~r/=>/},
+      {"try ?", ~r/\?(?![A-Za-z0-9_])/},
+      {"&&", ~r/&&/},
+      :rust_or
     ]
   }
 
   @arrow ~r/->/
 
-  @spec analyze(binary(), :zig | :kotlin | :swift) :: [Finding.t()]
+  @spec analyze(binary(), :zig | :kotlin | :swift | :rust) :: [Finding.t()]
   def analyze(source, lang) do
     cleaned = SourceCleaner.clean(source, lang)
 
@@ -347,6 +375,7 @@ defmodule PoopBags.TokenAnalyzer do
       :arrow -> scan(@arrow, cleaned, :arrow_filter)
       :case -> scan(~r/\bcase\b/, cleaned, :case_filter)
       :default_colon -> scan(~r/\bdefault\s*:/, cleaned, :default_colon_filter)
+      :rust_or -> scan(~r/\|\|/, cleaned, :rust_or_filter)
       {_label, regex} -> scan(regex, cleaned, fn _pos -> true end)
     end)
     |> Enum.reduce(%{}, fn pos, acc ->
@@ -391,6 +420,37 @@ defmodule PoopBags.TokenAnalyzer do
   defp scan(regex, cleaned, :default_colon_filter) do
     scan(regex, cleaned, fn pos -> not preceded_by_comma?(cleaned, pos) end)
   end
+
+  defp scan(regex, cleaned, :rust_or_filter) do
+    scan(regex, cleaned, fn pos -> rust_bool_or?(cleaned, pos) end)
+  end
+
+  # `a || b` is boolean-or; a `||` right after `=`/`(`/`,`/`[`/`{`/`;`/`:`/
+  # `>`/`!`/`|`/`&` or after `return`/`move`/`in` opens an empty-parameter
+  # closure (`unwrap_or_else(|| ...)`), not a branch. Documented
+  # false-negative: a left operand that was a blanked literal hides behind
+  # the operator that preceded it (`s == "x" || y` → `s == || y` → skipped).
+  defp rust_bool_or?(cleaned, pos) do
+    case prev_non_space_pos(cleaned, pos - 1) do
+      nil ->
+        false
+
+      p ->
+        case :binary.at(cleaned, p) do
+          c when c in [?=, ?(, ?,, ?[, ?{, ?;, ?:, ?>, ?!, ?|, ?&] -> false
+          _ -> word_back(cleaned, p, "") not in ~w(return move in)
+        end
+    end
+  end
+
+  defp prev_non_space_pos(cleaned, pos) when pos >= 0 do
+    case binary_part(cleaned, pos, 1) do
+      <<c>> when c in [?\s, ?\t, ?\n, ?\r] -> prev_non_space_pos(cleaned, pos - 1)
+      _ -> pos
+    end
+  end
+
+  defp prev_non_space_pos(_cleaned, _pos), do: nil
 
   # `) -> Int` is a function type, not a `when` arm.
   defp after_close_paren?(cleaned, pos) do
@@ -444,8 +504,11 @@ defmodule PoopBags.TokenAnalyzer do
 
     matches =
       @module_patterns[lang]
-      |> Regex.scan(cleaned, return: :index, capture: :first)
+      |> Enum.flat_map(fn pattern ->
+        Regex.scan(pattern, cleaned, return: :index, capture: :first)
+      end)
       |> Enum.map(fn [{pos, len}] -> {pos, pos + len} end)
+      |> Enum.sort()
 
     matches
     |> Enum.zip(Enum.drop(matches, 1) ++ [nil])
@@ -496,10 +559,12 @@ defmodule PoopBags.TokenAnalyzer do
   end
 
   defp module_group(binary, lang) do
-    case Regex.run(@module_patterns[lang], binary) do
-      [_, name] -> name
-      _ -> ""
-    end
+    Enum.find_value(@module_patterns[lang], "", fn pattern ->
+      case Regex.run(pattern, binary) do
+        [_, name] -> name
+        _ -> nil
+      end
+    end)
   end
 
   # ---------------------------------------------------------------- lines
@@ -567,6 +632,11 @@ defmodule PoopBags.TokenAnalyzer do
                 :default_colon ->
                   kind_counts(~r/\bdefault\s*:/, cleaned, span_list, open, close, "default:")
 
+                :rust_or ->
+                  kind_counts(~r/\|\|/, cleaned, span_list, open, close, "||",
+                    &rust_bool_or?(cleaned, &1)
+                  )
+
                 {label, regex} ->
                   kind_counts(regex, cleaned, span_list, open, close, label)
               end)
@@ -580,10 +650,14 @@ defmodule PoopBags.TokenAnalyzer do
     end
   end
 
-  defp kind_counts(regex, cleaned, span_list, open, close, kind) do
+  defp kind_counts(regex, cleaned, span_list, open, close, kind),
+    do: kind_counts(regex, cleaned, span_list, open, close, kind, fn _pos -> true end)
+
+  defp kind_counts(regex, cleaned, span_list, open, close, kind, keep?) do
     regex
     |> Regex.scan(cleaned, return: :index, capture: :first)
     |> Enum.map(fn [{pos, _len}] -> pos end)
+    |> Enum.filter(keep?)
     |> Enum.filter(fn pos -> pos >= open and pos < close end)
     |> Enum.reject(fn pos ->
       Enum.any?(span_list, fn {_k, {o, c}} -> o > open and pos >= o and pos < c end)

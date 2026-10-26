@@ -53,7 +53,7 @@ defmodule PoopBagsWeb.API.ScanController do
             "status, files, functions_total, worst_crap, avg_crap, violations, coverage mix, timings, pinned, details_expired_at"
         },
         "GET /api/scans/:id/findings" => %{
-          query: %{language: "elixir|zig|kotlin|swift", limit: "1-500 (default 100)"},
+          query: %{language: "elixir|zig|kotlin|swift|rust", limit: "1-500 (default 100)"},
           returns: "worst-first rows: function, module, path, line, complexity, crap",
           notes: "410 Gone when detail retention expired the scan"
         },

@@ -63,7 +63,7 @@ defmodule PoopBags.MCP do
         type: "object",
         properties: %{
           scan_id: %{type: "integer"},
-          language: %{type: "string", enum: ["elixir", "zig", "kotlin", "swift"]},
+          language: %{type: "string", enum: ["elixir", "zig", "kotlin", "swift", "rust"]},
           limit: %{type: "integer", description: "1-500, default 20"}
         },
         required: ["scan_id"]

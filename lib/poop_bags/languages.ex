@@ -10,7 +10,8 @@ defmodule PoopBags.Languages do
     ".zig" => :zig,
     ".kt" => :kotlin,
     ".kts" => :kotlin,
-    ".swift" => :swift
+    ".swift" => :swift,
+    ".rs" => :rust
   }
 
   # Build output, dependency caches, and vendored third-party trees are not
@@ -63,5 +64,5 @@ defmodule PoopBags.Languages do
   def max_files, do: @max_files
   def max_file_bytes, do: @max_file_bytes
 
-  def known_languages, do: ~w(elixir zig kotlin swift)a
+  def known_languages, do: ~w(elixir zig kotlin swift rust)a
 end
