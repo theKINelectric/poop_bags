@@ -25,6 +25,8 @@ building this service (the Mix path dependency), then install the locked Node
 packages at the parser root:
 
 ```sh
+# From this repository, create the sibling parser checkout once:
+git clone https://github.com/theKINelectric/js_ts_parser.git ../js_ts_parser
 (cd ../js_ts_parser && npm ci --ignore-scripts && npm test)
 mix deps.get
 mix test
