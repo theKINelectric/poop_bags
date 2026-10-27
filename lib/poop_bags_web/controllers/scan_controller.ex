@@ -273,6 +273,11 @@ defmodule PoopBagsWeb.ScanController do
         base = String.replace(finding.function_name, ~r/ \(clause \d+\)$/, "")
         PoopBags.ElixirAnalyzer.explain(source, base)
 
+      language when language in [:javascript, :typescript] ->
+        PoopBags.JavaScriptAnalyzer.explain(source, language, finding.function_name,
+          path: finding.path
+        )
+
       _ ->
         PoopBags.TokenAnalyzer.explain(source, lang, finding.function_name)
     end
@@ -342,7 +347,9 @@ defmodule PoopBagsWeb.ScanController do
   defp maybe_boundary(notes, true, note), do: notes ++ [note.()]
   defp maybe_boundary(notes, false, _note), do: notes
 
-  defp policy(%{stats: %{"policy" => p}}), do: p
+  defp policy(%{stats: %{"policy" => p} = stats}) when is_binary(p) and p != "",
+    do: {p, Map.get(stats, "parsers", [])}
+
   defp policy(_), do: nil
 
   defp scope(%{config: config}),

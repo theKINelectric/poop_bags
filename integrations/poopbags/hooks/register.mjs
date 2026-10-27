@@ -25,9 +25,10 @@ const RESP_CAP = 256 * 1024;
 const SCAN_BUDGET_MS = 20_000;
 const PENDING_MAX_MS = 120_000;
 const POLL_MS = 250;
-const TOOL = "poopbags-mod@0.2.0";
+const TOOL = "poopbags-mod@0.3.0";
 
-const SRC_EXTS = /\.(ex|exs|zig|kt|kts|swift|rs)$/;
+const SRC_EXTS = /\.(ex|exs|zig|kt|kts|swift|rs|js|jsx|mjs|cjs|ts|tsx|mts|cts)$/;
+const DECLARATION_FILES = /\.d\.(ts|mts|cts)$/;
 const SKIP_DIRS = new Set([
   ".git", "deps", "_build", "target", "node_modules", "vendor", "dist",
   "build", ".build", ".zig-cache", "zig-out", ".elixir_ls", ".cargo",
@@ -95,7 +96,7 @@ async function fingerprint($, root) {
       if (ent.isLink) continue;
       if (ent.kind === "dir") {
         if (!SKIP_DIRS.has(ent.name)) stack.push(child);
-      } else if (SRC_EXTS.test(ent.name) || ent.name === ".poopbags.json") {
+      } else if ((SRC_EXTS.test(ent.name) && !DECLARATION_FILES.test(ent.name)) || ent.name === ".poopbags.json") {
         files.push(child);
       }
     }
@@ -259,7 +260,9 @@ function footer(scan) {
         ? `measured (${measured} fns)`
         : `assumed ${scan?.assumed_coverage ?? 0}%`;
   const warn = scan?.coverage_warning ? `; coverage warning: ${String(scan.coverage_warning).slice(0, 200)}` : "";
-  return `advisory only — lexical analyzer (rust: token-level approximation, impl/match/closure guards); coverage ${cov}${warn}; never blocks.`;
+  const policy = typeof scan?.policy === "string" ? scan.policy.trim().replace(/\s+/g, " ").slice(0, 400) : "";
+  const analyzer = policy ? `analyzer policy: ${policy}` : "static analyzer (AST/token policy varies by language)";
+  return `advisory only — ${analyzer}; coverage ${cov}${warn}; never blocks.`;
 }
 
 async function submitScan($, cfg, rootKey, state, root, session, fpDigest) {

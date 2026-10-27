@@ -228,6 +228,17 @@ defmodule PoopBags.Engine do
       |> Map.merge(coverage_stats(ips))
       |> Map.put("violations", Enum.count(findings, &(&1.crap > config.threshold)))
       |> Map.put("policy", policy_string())
+      |> Map.put(
+        "analyzer_skips",
+        Enum.flat_map(ips, fn ip ->
+          Enum.map(ip.analyzer_skips, &Map.put(&1, "path", ip.rel_path))
+        end)
+        |> Enum.sort_by(&{&1["path"], &1["reason"]})
+      )
+      |> Map.put(
+        "parsers",
+        ips |> Enum.map(& &1.parser_meta) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
+      )
       |> maybe_carry_warning(scan)
 
     directories = PoopBags.Hotspots.aggregate(ips, config.threshold, config.hotspot_depth)
@@ -296,7 +307,8 @@ defmodule PoopBags.Engine do
   end
 
   defp policy_string,
-    do: "crap=comp^2*(1-cov)^3+comp; complexity=v1 (elixir-ast, zig/kotlin/swift-tokens)"
+    do:
+      "crap=comp^2*(1-cov)^3+comp; complexity=v2 (elixir-ast, zig/kotlin/swift/rust-tokens, js-ts-ast-v1); coverage=unique-lines-v2"
 
   # A degraded coverage report is recorded on the row mid-run; the finished
   # summary replaces stats wholesale, so the warning must ride along.

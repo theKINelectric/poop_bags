@@ -26,7 +26,7 @@ defmodule PoopBagsWeb.API.ScanController do
       service: "poop_bags",
       description:
         "Bags the CRAP (Change Risk Anti-Patterns) of a local project directory — " <>
-          "static analysis of Elixir, Zig, Kotlin, and Swift. Never builds, runs, or modifies the scanned project.",
+          "static analysis of Elixir, Zig, Kotlin, Swift, Rust, JavaScript, and TypeScript. Never builds, runs, or modifies the scanned project.",
       developed_by: "iStellar~iModal 🛸🕳️",
       formula: "CRAP(m) = complexity(m)^2 × (1 − coverage(m))^3 + complexity(m)",
       bands: %{"fresh" => "≤ 5", "whiffy" => "≤ 20", "foul" => "≤ 50", "biohazard" => "> 50"},
@@ -53,7 +53,10 @@ defmodule PoopBagsWeb.API.ScanController do
             "status, files, functions_total, worst_crap, avg_crap, violations, coverage mix, timings, pinned, details_expired_at"
         },
         "GET /api/scans/:id/findings" => %{
-          query: %{language: "elixir|zig|kotlin|swift|rust", limit: "1-500 (default 100)"},
+          query: %{
+            language: "elixir|zig|kotlin|swift|rust|javascript|typescript",
+            limit: "1-500 (default 100)"
+          },
           returns: "worst-first rows: function, module, path, line, complexity, crap",
           notes: "410 Gone when detail retention expired the scan"
         },
@@ -68,7 +71,7 @@ defmodule PoopBagsWeb.API.ScanController do
         violation:
           "CRAP strictly above the scan's threshold (default 20; .poopbags.json or the web form can set it)",
         gate:
-          "gate_passed=false iff introduced violations or above-threshold regressions vs the baseline",
+          "gate_passed=false when scans are incomparable or introduce violations or above-threshold regressions",
         identity: "language + path + module + function — line numbers never matter",
         coverage:
           "assumed (default 0%) unless the project names an LCOV/ExCoveralls report in .poopbags.json",
@@ -139,8 +142,18 @@ defmodule PoopBagsWeb.API.ScanController do
       avg_crap: scan.avg_crap,
       violations: scan.stats["violations"],
       by_language:
-        Map.drop(scan.stats, ["policy", "coverage", "coverage_warning", "violations", "timings"]),
+        Map.drop(scan.stats, [
+          "policy",
+          "coverage",
+          "coverage_warning",
+          "violations",
+          "timings",
+          "parsers",
+          "analyzer_skips"
+        ]),
       policy: scan.stats["policy"],
+      parsers: scan.stats["parsers"] || [],
+      analyzer_skips: scan.stats["analyzer_skips"] || [],
       threshold: scan.threshold,
       coverage: scan.stats["coverage"],
       coverage_warning: scan.stats["coverage_warning"],

@@ -188,7 +188,9 @@ defmodule PoopBags.Coverage do
     |> Enum.map(fn finding ->
       span = {finding.line, max(finding.end_line, finding.line)}
 
-      case measure(span, lines, spans) do
+      eligible_lines = Map.drop(lines, MapSet.to_list(finding.ambiguous_coverage_lines))
+
+      case measure(span, eligible_lines, spans) do
         {:ok, ratio} -> %{finding | coverage: ratio, coverage_source: "measured"}
         :unknown -> %{finding | coverage_source: "unknown"}
       end

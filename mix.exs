@@ -54,6 +54,7 @@ defmodule PoopBags.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
+      {:js_ts_parser, path: "../js_ts_parser/elixir"},
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       # The conveyor belt each bag rides: files in, CRAP findings out.

@@ -173,8 +173,14 @@ defmodule PoopBags.ProjectConfig do
   defp parse_languages(list) when is_list(list) do
     list
     |> Enum.map(fn
-      lang when is_binary(lang) -> String.to_atom(lang)
-      lang when is_atom(lang) -> lang
+      lang when is_binary(lang) ->
+        Enum.find(Languages.known_languages(), &(Atom.to_string(&1) == lang))
+
+      lang when is_atom(lang) ->
+        lang
+
+      _ ->
+        nil
     end)
     |> Enum.filter(&(&1 in Languages.known_languages()))
     |> case do

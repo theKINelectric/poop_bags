@@ -9,6 +9,7 @@ defmodule PoopBags.Analysis.Finding do
             line: 1,
             end_line: 1,
             complexity: 1,
+            ambiguous_coverage_lines: MapSet.new(),
             coverage: nil,
             coverage_source: "unknown"
 
@@ -18,6 +19,7 @@ defmodule PoopBags.Analysis.Finding do
           line: pos_integer(),
           end_line: pos_integer(),
           complexity: pos_integer(),
+          ambiguous_coverage_lines: MapSet.t(),
           coverage: float() | nil,
           coverage_source: String.t()
         }

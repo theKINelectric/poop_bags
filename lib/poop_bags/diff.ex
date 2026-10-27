@@ -32,6 +32,7 @@ defmodule PoopBags.Diff do
             comparable: true,
             warnings: [],
             rows: [],
+            gate_failure_rows: [],
             summary: %{}
 
   @outcomes ~w(introduced removed regressed improved resolved unchanged)a
@@ -39,9 +40,9 @@ defmodule PoopBags.Diff do
   @doc """
   Diffs `current` (the newer scan) against `baseline`.
 
-  Options: `:limit` (rows per non-headline outcome, default 200) — matched
-  unchanged rows are dropped entirely from `rows` (they are only counts in
-  the summary); `:outcome` filtering happens in the caller.
+  Options: `:limit` (maximum display rows, default 200). The CI gate evaluates
+  every identity independently of this display limit; `:outcome` filtering
+  happens in the caller.
   """
   @spec between(Scan.t(), Scan.t(), keyword()) :: %__MODULE__{}
   def between(%Scan{} = baseline, %Scan{} = current, opts \\ []) do
@@ -50,6 +51,10 @@ defmodule PoopBags.Diff do
 
     warnings =
       []
+      |> warn_unless(
+        fn -> (baseline.files_failed || 0) == 0 and (current.files_failed || 0) == 0 end,
+        "one or both scans contain failed files; partial findings cannot establish a clean comparison"
+      )
       |> warn_unless(
         fn -> baseline.project_path == current.project_path end,
         "scans cover different projects"
@@ -105,13 +110,19 @@ defmodule PoopBags.Diff do
         end
       end)
 
+    sorted_rows = rows |> Enum.reverse() |> sort_rows()
+
+    gate_failure_rows =
+      Enum.filter(sorted_rows, &(&1.outcome in [:introduced, :regressed] and &1.violation))
+
     %__MODULE__{
       baseline: baseline,
       current: current,
       threshold: threshold,
       comparable: warnings == [],
       warnings: warnings,
-      rows: rows |> Enum.reverse() |> sort_rows() |> Enum.take(limit),
+      rows: Enum.take(sorted_rows, limit),
+      gate_failure_rows: gate_failure_rows,
       summary: Map.merge(Enum.into(@outcomes, %{}, &{&1, 0}), summary)
     }
   end
@@ -123,13 +134,11 @@ defmodule PoopBags.Diff do
   violations do.
   """
   @spec gate_failures(%__MODULE__{}) :: [map()]
-  def gate_failures(%__MODULE__{} = diff) do
-    Enum.filter(diff.rows, &(&1.outcome in [:introduced, :regressed] and &1.violation))
-  end
+  def gate_failures(%__MODULE__{gate_failure_rows: rows}), do: rows
 
   @doc "CI verdict: fail when there are gate failures."
   @spec gate_passed?(%__MODULE__{}) :: boolean()
-  def gate_passed?(%__MODULE__{} = diff), do: gate_failures(diff) == []
+  def gate_passed?(%__MODULE__{} = diff), do: diff.comparable and gate_failures(diff) == []
 
   # ---------------------------------------------------------------- identity
 
@@ -217,7 +226,9 @@ defmodule PoopBags.Diff do
 
   # ---------------------------------------------------------------- guards
 
-  defp policy_of(%Scan{stats: %{"policy" => p}}), do: p
+  defp policy_of(%Scan{stats: %{"policy" => p} = stats}) when is_binary(p) and p != "",
+    do: {p, Map.get(stats, "parsers", [])}
+
   defp policy_of(%Scan{stats: _}), do: nil
 
   defp exclusions_of(%Scan{config: %{"exclude" => e}}), do: e || []
