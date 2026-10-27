@@ -633,7 +633,13 @@ defmodule PoopBags.TokenAnalyzer do
                   kind_counts(~r/\bdefault\s*:/, cleaned, span_list, open, close, "default:")
 
                 :rust_or ->
-                  kind_counts(~r/\|\|/, cleaned, span_list, open, close, "||",
+                  kind_counts(
+                    ~r/\|\|/,
+                    cleaned,
+                    span_list,
+                    open,
+                    close,
+                    "||",
                     &rust_bool_or?(cleaned, &1)
                   )
 
