@@ -58,18 +58,11 @@ defmodule PoopBags.MixProject do
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       # The conveyor belt each bag rides: files in, CRAP findings out.
-      # Sibling checkout wins when present (the house development layout);
-      # cloners get the upstream repo.
-      flowextra_dep()
+      # Pin the public dependency so clean checkouts use the qualified code.
+      {:flowextra,
+       git: "https://github.com/theKINelectric/flow_extra.git",
+       ref: "81e8f3b1fa959666dee5a81b96f5cd8c9ee1341e"}
     ]
-  end
-
-  defp flowextra_dep do
-    if File.dir?(Path.expand("../flow_extra/lib")) do
-      {:flowextra, path: "../flow_extra"}
-    else
-      {:flowextra, git: "https://codeberg.org/kin_electric/flow_extra.git"}
-    end
   end
 
   # Aliases are shortcuts or tasks specific to the current project.
