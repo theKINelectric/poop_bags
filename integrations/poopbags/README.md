@@ -68,7 +68,7 @@ malformed reply degrades to one `unknown` notice plus an evidence file.
 
 ## Limitations that travel with every notice
 
-`advisory only — lexical analyzer (rust: token-level approximation); coverage
+`advisory only — static analyzer (AST/token policy varies by language); coverage
 assumed N% unless .poopbags.json names a report; never blocks.`
 
 ## Validation
@@ -85,3 +85,12 @@ CLI execution. Current receipts: strict validation pass, 12/12 contract
 controls, 4/4 native-surface tests. The real local CLI edit/boundary
 transcript is outstanding — it needs a paid-model `claude` session, which the
 portfolio plan lists as a reserved call.
+
+
+### JavaScript / TypeScript source changes
+
+Mod `poopbags-mod@0.3.0` includes `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`,
+`.mts` and `.cts` in the content fingerprint, excluding TypeScript declaration
+files. Notices show the scan's recorded analyzer policy when supplied, and a
+generic AST/token description otherwise. This extends advisory source detection;
+it does not claim a new native CLI/SDK qualification beyond the recorded tests.

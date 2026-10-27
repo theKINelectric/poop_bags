@@ -28,7 +28,7 @@ defmodule PoopBags.MCP do
       name: "bag_project",
       description:
         "Scan a local project directory for CRAP (Change Risk Anti-Patterns) — " <>
-          "complexity x untested pressure, per function, for Elixir/Zig/Kotlin/Swift. " <>
+          "complexity x untested pressure, per function, for Elixir/Zig/Kotlin/Swift/Rust/JavaScript/TypeScript. " <>
           "Waits for the scan to finish (up to wait_seconds) and returns the summary " <>
           "plus the worst functions. Static analysis only; the project is never built or run.",
       inputSchema: %{
@@ -63,7 +63,10 @@ defmodule PoopBags.MCP do
         type: "object",
         properties: %{
           scan_id: %{type: "integer"},
-          language: %{type: "string", enum: ["elixir", "zig", "kotlin", "swift", "rust"]},
+          language: %{
+            type: "string",
+            enum: ["elixir", "zig", "kotlin", "swift", "rust", "javascript", "typescript"]
+          },
           limit: %{type: "integer", description: "1-500, default 20"}
         },
         required: ["scan_id"]
@@ -74,7 +77,7 @@ defmodule PoopBags.MCP do
       description:
         "Diff a finished scan against its baseline (the previous finished scan of the " <>
           "same project): introduced/regressed/improved/resolved/removed per function, " <>
-          "plus gate_passed (false only when new violations or above-threshold regressions appeared).",
+          "plus gate_passed (false for incomparable scans, new violations, or above-threshold regressions).",
       inputSchema: %{
         type: "object",
         properties: %{scan_id: %{type: "integer"}},

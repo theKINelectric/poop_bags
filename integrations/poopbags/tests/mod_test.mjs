@@ -65,14 +65,14 @@ const stop = (session_id = "s1", cwd = ROOT, active = false) => ({
 });
 const passthrough = (e) => e;
 
-const okScan = (id) => ({ status: 200, ok: true, headers: {}, text: JSON.stringify({ id, status: "done", project_path: ROOT, functions_total: 7, violations: 1, threshold: 20, assumed_coverage: 0 }) });
+const okScan = (id, fields = {}) => ({ status: 200, ok: true, headers: {}, text: JSON.stringify({ id, status: "done", project_path: ROOT, functions_total: 7, violations: 1, threshold: 20, assumed_coverage: 0, ...fields }) });
 const diffBody = (over = {}) => JSON.stringify({
   scan_id: 2, baseline_id: 1, threshold: 20, comparable: true, warnings: [],
   summary: { introduced: 0, removed: 0, regressed: 0, improved: 0, resolved: 0, unchanged: 7 },
   gate_passed: true, rows: [], ...over,
 });
 
-function scanServer({ scanId = 1, diffStatus = 200, diff = diffBody(), statusSeq = ["done"] } = {}) {
+function scanServer({ scanId = 1, diffStatus = 200, diff = diffBody(), statusSeq = ["done"], scanFields = {} } = {}) {
   const calls = [];
   let poll = 0;
   const fetch = async (url, init = {}) => {
@@ -85,7 +85,7 @@ function scanServer({ scanId = 1, diffStatus = 200, diff = diffBody(), statusSeq
     }
     if (/\/api\/scans\/\d+$/.test(url)) {
       const st = statusSeq[Math.min(poll++, statusSeq.length - 1)];
-      if (st === "done") return okScan(scanId);
+      if (st === "done") return okScan(scanId, scanFields);
       return { status: 200, ok: true, headers: {}, text: JSON.stringify({ id: scanId, status: st }) };
     }
     return { status: 404, ok: false, headers: {}, text: "{}" };
@@ -100,6 +100,75 @@ test("no edits: Stop forwards unchanged, no service traffic", async () => {
   assert.equal(result.cwd, ROOT);
   assert.equal(srv.calls.length, 0);
 });
+
+for (const extension of ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]) {
+  test(`${extension} source bytes participate in replay and rescan decisions`, async () => {
+    const path = `${ROOT}/src/eligible.${extension}`;
+    const source = "export const eligible = age => age >= 18;\n";
+    const srv = scanServer();
+    const h = host({ fetch: srv.fetch, files: { [path]: source }, sessionRef: { id: "s1" } });
+    const changed = { ...edit(), tool_input: { file_path: path } };
+
+    await h.hooks.get("classic.PostToolUse")(h.$, changed, passthrough);
+    await h.hooks.get("classic.Stop")(h.$, stop(), passthrough);
+    assert.equal(srv.calls.filter((call) => call.startsWith("POST")).length, 1);
+
+    // Editing without a content change replays the same observation.
+    await h.hooks.get("classic.PostToolUse")(h.$, changed, passthrough);
+    await h.hooks.get("classic.Stop")(h.$, stop(), passthrough);
+    assert.equal(srv.calls.filter((call) => call.startsWith("POST")).length, 1);
+
+    h.fsFiles.set(path, source.replace(">= 18", ">= 21"));
+    await h.hooks.get("classic.PostToolUse")(h.$, changed, passthrough);
+    await h.hooks.get("classic.Stop")(h.$, stop(), passthrough);
+    assert.equal(srv.calls.filter((call) => call.startsWith("POST")).length, 2, "changed source must rescan");
+  });
+}
+
+for (const extension of ["d.ts", "d.mts", "d.cts"]) {
+  test(`${extension} declarations remain excluded from source fingerprints`, async () => {
+    const declaration = `${ROOT}/src/types.${extension}`;
+    const srv = scanServer();
+    const h = host({ fetch: srv.fetch, files: {
+      [`${ROOT}/src/index.ts`]: "export const ready = () => true;\n",
+      [declaration]: "declare function eligible(age: number): boolean;\n",
+    }, sessionRef: { id: "s1" } });
+    await h.hooks.get("classic.PostToolUse")(h.$, edit(), passthrough);
+    await h.hooks.get("classic.Stop")(h.$, stop(), passthrough);
+
+    h.fsFiles.set(declaration, "declare function eligible(age: bigint): boolean;\n");
+    await h.hooks.get("classic.PostToolUse")(h.$, { ...edit(), tool_input: { file_path: declaration } }, passthrough);
+    await h.hooks.get("classic.Stop")(h.$, stop(), passthrough);
+    assert.equal(srv.calls.filter((call) => call.startsWith("POST")).length, 1, "declarations must not trigger source rescans");
+  });
+}
+
+test("footer reports recorded analyzer policy and preserves coverage provenance", async () => {
+  const policy = "complexity=v2 (elixir-ast, rust-tokens, js-ts-ast-v1); coverage=unique-lines-v2";
+  const srv = scanServer({ scanFields: { policy, coverage: { measured_functions: 3, assumed_functions: 2 }, coverage_warning: "missing source map" } });
+  const h = host({ fetch: srv.fetch, sessionRef: { id: "s1" } });
+  await h.hooks.get("classic.PostToolUse")(h.$, edit(), passthrough);
+  const result = await h.hooks.get("classic.Stop")(h.$, stop(), passthrough);
+  const notice = result.additionalContext.join("\n");
+  assert.ok(notice.includes(`analyzer policy: ${policy}`));
+  assert.match(notice, /mixed \(3 measured, 2 assumed fns\)/);
+  assert.match(notice, /coverage warning: missing source map/);
+  assert.doesNotMatch(notice, /lexical analyzer/);
+  assert.equal(result.block, undefined);
+  assert.equal(result.preventContinuation, undefined);
+});
+
+for (const policy of [undefined, null, {}, "   "]) {
+  test(`footer uses an honest generic policy when recorded policy is ${JSON.stringify(policy)}`, async () => {
+    const srv = scanServer({ scanFields: { policy } });
+    const h = host({ fetch: srv.fetch, sessionRef: { id: "s1" } });
+    await h.hooks.get("classic.PostToolUse")(h.$, edit(), passthrough);
+    const result = await h.hooks.get("classic.Stop")(h.$, stop(), passthrough);
+    const notice = result.additionalContext.join("\n");
+    assert.match(notice, /static analyzer \(AST\/token policy varies by language\)/);
+    assert.doesNotMatch(notice, /lexical analyzer|impl\/match\/closure guards|js-ts-ast-v1/);
+  });
+}
 
 test("edit then Stop with no baseline: initial observation, never a gate pass", async () => {
   const srv = scanServer({ scanId: 11 });
@@ -384,7 +453,7 @@ test("restart with unresolved uncertain submission: stays unknown, refuses resub
   fsFiles.set(`${STATE}/${rootKey}/state.json`, JSON.stringify({
     schema: "poopbags-mod/1", baseline_id: 7, digest: "d", last_scan_id: 7, notice: null,
     pending: null,
-    uncertain_scan: { at: Date.now() - 60_000, client_ref: "ref-old", submitted_digest: "d", tool: "poopbags-mod@0.2.0" },
+    uncertain_scan: { at: Date.now() - 60_000, client_ref: "ref-old", submitted_digest: "d", tool: "poopbags-mod@0.3.0" },
     dirty_by: { s1: "x" },
   }));
   const h = host({ fetch: srv.fetch, sessionRef: { id: "s1" }, fsFiles });

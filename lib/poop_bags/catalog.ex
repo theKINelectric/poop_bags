@@ -34,7 +34,7 @@ defmodule PoopBags.Catalog do
     from(s in Scan,
       where:
         s.project_path == ^scan.project_path and
-          s.status == "done" and
+          s.status == "done" and is_nil(s.details_expired_at) and
           s.id != ^scan.id,
       order_by: [desc: s.finished_at, desc: s.id],
       limit: 1

@@ -11,7 +11,8 @@ defmodule PoopBags.MixProject do
       aliases: aliases(),
       deps: deps(),
       # The agent face: the same JSON contract as the HTTP API over stdio.
-      # Build with `mix escript.build`; it needs only Erlang/Elixir on PATH.
+      # The built artifact is committed at bin/poop_bags_mcp so agents can
+      # run it straight from a checkout (needs only Erlang/Elixir on PATH).
       # app: false — the script talks HTTP; it must not boot the whole
       # supervision tree (the SQLite NIF cannot load from inside an escript).
       escript: [
@@ -53,10 +54,14 @@ defmodule PoopBags.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
+      {:js_ts_parser, path: "../js_ts_parser/elixir"},
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       # The conveyor belt each bag rides: files in, CRAP findings out.
-      {:flowextra, "~> 0.6"}
+      # Pin the public dependency so clean checkouts use the qualified code.
+      {:flowextra,
+       git: "https://github.com/theKINelectric/flow_extra.git",
+       ref: "81e8f3b1fa959666dee5a81b96f5cd8c9ee1341e"}
     ]
   end
 

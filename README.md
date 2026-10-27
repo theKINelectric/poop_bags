@@ -2,7 +2,7 @@
 
 A standalone web service that takes a local project directory and **bags the CRAP** — **C**hange **R**isk **A**nti-**P**atterns — function by function. Then it tells you whether your refactor actually cleaned anything up.
 
-Built with **Phoenix** + **[FlowExtra](https://github.com/theKINelectric/flow_extra)** (the Flowex fork's GenStage railway pipelines) + **SQLite**. Works on **Elixir, Zig, Kotlin, Swift, and Rust**. Developed by **🛸🕳️ iStellar~iModal**.
+Built with **Phoenix** + **[FlowExtra](https://codeberg.org/kin_electric/flow_extra)** (the Flowex fork's GenStage railway pipelines) + **SQLite**. Works on **Elixir, Zig, Kotlin, Swift, Rust, JavaScript, and TypeScript**. Developed by **🛸🕳️ iStellar~iModal**.
 
 ```
 CRAP(m) = complexity(m)² × (1 − coverage(m))³ + complexity(m)
@@ -16,6 +16,29 @@ High complexity with nothing pinning it down (no tests) is change risk. poop_bag
 $ mix setup          # deps + sqlite db (migrations auto-run on boot)
 $ mix phx.server     # http://localhost:4100 (PORT= to move it)
 ```
+
+### JavaScript / TypeScript parser dependency
+
+JS/TS scanning uses the shared sibling package `../js_ts_parser`: a pinned Babel
+parser with a bounded Elixir bridge. Keep its `elixir/` directory available when
+building this service (the Mix path dependency), then install the locked Node
+packages at the parser root:
+
+```sh
+# From this repository, create the sibling parser checkout once:
+git clone https://github.com/theKINelectric/js_ts_parser.git ../js_ts_parser
+(cd ../js_ts_parser && npm ci --ignore-scripts && npm test)
+mix deps.get
+mix test
+```
+
+Node 20+ is required for the helper. For a deployed service, point
+`JS_TS_PARSER_ROOT` at the trusted helper package; `JS_TS_PARSER_NODE` may select
+a trusted Node executable. No packages are installed during a scan. Missing or
+incompatible parser infrastructure produces failed-file evidence, not a clean
+zero-function scan. A web scan retains valid neighboring findings; CI exits 2
+if any file failed. Comparisons with incomplete scans or different analyzer
+policies cannot pass a gate.
 
 Paste an absolute path to a project directory and press **Bag it**. The scan page polls live progress; when the belts stop you get every function ranked worst-first, with stench bands:
 
@@ -66,7 +89,9 @@ $ mix poop_bags.ci --path /abs/project
 $ mix poop_bags.ci --path . --against latest --threshold 30 --format json --out report.json
 ```
 
-Scans synchronously (same SQLite ledger as the web UI — a CI run and a web run produce the same explained result), diffs against the latest finished baseline of the same project (`--against <id>|latest|none`), prints a markdown or JSON report, and exits `1` when new violations or above-threshold regressions appeared (`2` if the scan itself failed). Coverage reports are strict here: an unusable report fails the run instead of degrading to assumed.
+Scans synchronously (same SQLite ledger as the web UI — a CI run and a web run produce the same explained result), diffs against the latest finished baseline of the same project (`--against <id>|latest|none`), prints a markdown or JSON report, and exits `1` when new violations or above-threshold regressions appeared (`2` if any source file failed, the scan itself failed, or the scans are not comparable). Coverage reports are strict here: an unusable report fails the run instead of degrading to assumed.
+
+The scan page shows parser versions and exclusions separately from language totals. The API exposes them as `parsers` and `analyzer_skips`, with each exclusion carrying its source `path` and `reason`. A `module_scope` entry identifies expressions outside reported functions; it does not count the entire file as skipped. Display row limits never limit the CI verdict.
 
 ### Explain this score
 
@@ -92,7 +117,7 @@ A 99k-finding scan accumulates fast. The app keeps detailed findings for the **l
 
 - the trends timeline still lists them (that's the point — the trend outlives the findings),
 - findings listings, diffs, and explanations against them return a clear **unavailable** (HTTP 410 for the API), never a misleading empty result,
-- the CI task falls back to the latest usable baseline when `--against` names an expired one.
+- an explicit CI `--against <id>` is authoritative: malformed, missing, expired, or unfinished baselines exit `2`; omit it or use `latest` for automatic selection, or `none` to record a fresh scan without comparison.
 
 Sweeps run after every successful commit and at boot, outside the commit transaction, idempotently — a sweep problem is logged and never disturbs a finished scan. Failed scans never displace successful history. Expiry is one-way: pinning an expired scan cannot resurrect its details.
 
@@ -104,7 +129,7 @@ walker ──▶ Engine ──▶ FlowExtra pipeline (GenStage belts, admission-
                                                         └── any raise → error_pipe: bag_the_mess
 ```
 
-- `PoopBags.Walker` collects source files (extension whitelist: `.ex .exs .zig .kt .kts .swift .rs`; skips `.git`, `deps`, `node_modules`, `_build`, caches, `vendor`, …; 30k-file and 1.5MB-per-file caps, everything skipped is counted) — now with `.poopbags.json` exclusions and language filters.
+- `PoopBags.Walker` collects source files (extension whitelist: `.ex .exs .zig .kt .kts .swift .rs .js .jsx .mjs .cjs .ts .tsx .mts .cts`; skips `.git`, `deps`, `node_modules`, `_build`, caches, `vendor`, …; 30k-file and 1.5MB-per-file caps, everything skipped is counted) — now with `.poopbags.json` exclusions and language filters.
 - `PoopBags.Engine` is the one place a scan happens: config resolution, walker, coverage ingestion and alignment, the FlowExtra belt driven from an unlinked task pool (one bad file is one failed file, never a dead runner), per-file content hashing, and an all-or-nothing transaction committing findings + file manifest + directory aggregates + summary. The web `ScanRunner` and the CI task are both thin shells over it.
 - Findings carry line spans, per-function coverage + provenance, and the manifest records every file's sha256 — the snapshot identity coverage attribution and future caching lean on.
 - `PoopBags.Retention` expires old scans' details after each commit and at boot; `PoopBags.Hotspots` builds the durable per-directory aggregates that survive expiry.
@@ -116,6 +141,30 @@ walker ──▶ Engine ──▶ FlowExtra pipeline (GenStage belts, admission-
 - Counted: `if`/`unless` (+1), `cond` conditions, `case` arms, `with` steps + `else` arms, `receive` arms + `after`, `fn` arms past the first (lambda bodies count into their parent), `and`/`or`/`&&`/`||` (including guards), `try` rescue/catch/else arms.
 - `quote` blocks are pruned (that's generated code, not this code).
 - Parsing is **atom-safe** (`static_atoms_encoder`): scanning foreign projects for months cannot grow the atom table.
+
+**JavaScript / TypeScript** use the shared Babel AST helper, including JSX and
+TSX modes selected by filename. Findings cover executable declarations, arrows,
+expressions, object/class/private methods, getters/setters and constructors.
+Nested functions own their own branch contributions. Type-only declarations,
+bodyless signatures and `.d.ts` / `.d.mts` / `.d.cts` files are not executable
+findings. `.next`, `.nuxt`, `.turbo` and `.svelte-kit` output trees are excluded.
+
+Policy `js-ts-ast-v1` counts base 1 plus `if`, loops, `catch`, ternaries, switch
+arms including default, `&&`, `||`, `??` and optional member/call nodes. Type
+syntax, strings/comments, regex and JSX text add no points; expressions within
+JSX and templates are traversed. Decorators and Flow are unsupported and fail
+explicitly. Module statements and implicit initializers do not invent synthetic
+function findings. See the shared parser README for exact policy and naming.
+
+Original-source LCOV remains line coverage, not branch coverage. JS/TS physical
+lines shared at function boundaries cannot be assigned confidently and are
+omitted from measured ownership. A function with no uniquely attributable
+reported lines stays unknown and uses the recorded assumed fallback. Separate
+body lines can still give a nested function measured coverage. No source-map
+remapping from generated JavaScript is claimed. Parsing never evaluates subject
+code, imports, Babel plugins, `tsconfig` or build configuration. The helper is
+bounded by input/output limits and a finite deadline, with cleanup on timeout
+or caller death; inherited Node preloads are removed.
 
 **Zig / Kotlin / Swift / Rust** get a token analyzer, since no resident compiler exists for them:
 1. `PoopBags.SourceCleaner` blanks comments and string/char literals with **byte-length and newline preservation** — handles Zig multiline `\\` literals, Kotlin `"""` + nested block comments + `${}` interpolation, Swift `"""`, `#"raw"#` strings and `\()` interpolation, and Rust `r#"raw"#` strings (the close is `"` plus the opening count of `#`s), nested block comments, and multiline `"..."` literals. Rust `'a`-style lifetimes/labels are told apart from `'x'` char literals by whether the identifier run ends at a closing quote.
@@ -168,8 +217,8 @@ $ curl -s "$URL/api/scans/$ID/findings?limit=20"                   # worst-first
 $ curl -s "$URL/api/scans/$ID/diff?against=latest"                 # outcomes + gate
 ```
 
-**MCP server:** `bin/poop_bags_mcp` (an escript: build it once with
-`mix escript.build`; it then runs anywhere with Erlang/Elixir on PATH) speaks Model Context Protocol over
+**MCP server:** `bin/poop_bags_mcp` (committed escript — runs anywhere with
+Erlang/Elixir on PATH, no build step) speaks Model Context Protocol over
 stdio with four tools — `bag_project` (the one-call scan-and-wait loop),
 `scan_status`, `top_findings`, `diff_latest`. Point it at the service with
 `POOP_BAGS_URL` (default `http://localhost:4100`):

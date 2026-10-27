@@ -13,7 +13,7 @@ defmodule PoopBagsWeb.ScanHTML do
       else: min(100, round(scan.files_done * 100 / scan.files_total))
   end
 
-  @non_language_stats ~w(policy coverage coverage_warning violations timings)
+  @non_language_stats ~w(policy coverage coverage_warning violations timings parsers analyzer_skips)
 
   def language_stats(scan) do
     scan.stats

@@ -137,6 +137,26 @@ defmodule PoopBags.DiffTest do
     assert diff2.warnings |> Enum.join(" ") =~ "different projects"
   end
 
+  test "CI gate keeps a violating regression hidden behind 25 display rows", %{
+    baseline: baseline,
+    current: current
+  } do
+    clean_before = Enum.map(1..26, &f("clean_#{&1}", 1.0, 1))
+    clean_after = Enum.map(1..26, &f("clean_#{&1}", 19.0, 3))
+    put_findings(baseline, [f("hidden_violation", 19.9, 4) | clean_before])
+    put_findings(current, [f("hidden_violation", 20.1, 4) | clean_after])
+    current = finish_scan!(current)
+
+    for limit <- [0, 1, 25] do
+      diff = Diff.between(baseline, current, limit: limit)
+      assert length(diff.rows) == limit
+      refute Enum.any?(diff.rows, &(identity_name(&1) == "hidden_violation"))
+      assert diff.summary.regressed == 27
+      assert Enum.map(Diff.gate_failures(diff), &identity_name/1) == ["hidden_violation"]
+      refute Diff.gate_passed?(diff)
+    end
+  end
+
   # ---------------------------------------------------------------- helpers
 
   defp f(name, crap, cx) do

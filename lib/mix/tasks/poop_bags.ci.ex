@@ -14,7 +14,8 @@ defmodule Mix.Tasks.PoopBags.Ci do
 
   * `--path` (required) — project directory to scan
   * `--against` — baseline scan id, or `latest` (default: the most recent
-    finished scan of the same project; `none` skips the diff)
+    finished scan of the same project; `none` skips the diff). An explicit ID
+    must identify a finished, unexpired scan; invalid or unavailable IDs fail.
   * `--threshold` — CRAP strictly above this is a violation (overrides
     `.poopbags.json`)
   * `--coverage-report` — path to an LCOV or ExCoveralls JSON report
@@ -23,10 +24,10 @@ defmodule Mix.Tasks.PoopBags.Ci do
   * `--label` — label for the scan row
   * `--format` — `markdown` (default) or `json`
   * `--out` — also write the report to this file
-  * `--max-rows` — rows per outcome shown in the report (default 25)
+  * `--max-rows` — display rows shown in the report (default 25); never limits the gate
 
   Exit codes: `0` gate passed (or no baseline), `1` gate failed,
-  `2` the scan itself failed.
+  `2` the scan or requested comparison failed.
 
   The scan lands in the same SQLite ledger the web UI reads, so a CI run and
   a web run produce the same explained result.
@@ -73,6 +74,14 @@ defmodule Mix.Tasks.PoopBags.Ci do
              strict_coverage: true,
              coverage_report: opts[:coverage_report]
            ) do
+      if scan.files_failed > 0 do
+        Mix.shell().error(
+          "poop_bags: scan failed: #{scan.files_failed} file(s) could not be analyzed; partial results retained in scan ##{scan.id}"
+        )
+
+        exit({:shutdown, 2})
+      end
+
       baseline = resolve_baseline(scan, opts[:against])
       diff = baseline && diff_for(baseline, scan, opts)
 
@@ -98,6 +107,11 @@ defmodule Mix.Tasks.PoopBags.Ci do
     :ok
   end
 
+  defp announce_gate(%{comparable: false} = diff, _baseline) do
+    Mix.shell().error("poop_bags: comparison failed: " <> Enum.join(diff.warnings, "; "))
+    exit({:shutdown, 2})
+  end
+
   defp announce_gate(diff, baseline) do
     if Diff.gate_passed?(diff) do
       Mix.shell().info("\npoop_bags: gate PASS (baseline scan ##{baseline.id})")
@@ -118,29 +132,33 @@ defmodule Mix.Tasks.PoopBags.Ci do
   defp resolve_baseline(scan, "latest"), do: Catalog.latest_baseline(scan)
   defp resolve_baseline(scan, nil), do: Catalog.latest_baseline(scan)
 
-  defp resolve_baseline(scan, id) when is_binary(id) do
+  defp resolve_baseline(_scan, id) when is_binary(id) do
     case Integer.parse(id) do
-      {int_id, ""} ->
+      {int_id, ""} when int_id > 0 and int_id <= 9_223_372_036_854_775_807 ->
         case Catalog.get_scan(int_id) do
           nil ->
-            Mix.shell().error("poop_bags: baseline scan ##{int_id} not found — using latest")
-            Catalog.latest_baseline(scan)
+            baseline_error("baseline scan ##{int_id} not found")
+
+          %Catalog.Scan{details_expired_at: expired} when not is_nil(expired) ->
+            baseline_error("baseline scan ##{int_id} details expired by retention")
+
+          %Catalog.Scan{status: status} when status != "done" ->
+            baseline_error("baseline scan ##{int_id} has not finished (status #{status})")
 
           baseline ->
-            if Catalog.Scan.details_available?(baseline) do
-              baseline
-            else
-              Mix.shell().error(
-                "poop_bags: baseline scan ##{int_id} details expired by retention — using latest"
-              )
-
-              Catalog.latest_baseline(scan)
-            end
+            baseline
         end
 
       _ ->
-        Catalog.latest_baseline(scan)
+        baseline_error(
+          "invalid baseline #{inspect(id)}; expected a positive scan ID, latest or none"
+        )
     end
+  end
+
+  defp baseline_error(message) do
+    Mix.shell().error("poop_bags: comparison failed: " <> message)
+    exit({:shutdown, 2})
   end
 
   defp diff_for(baseline, scan, opts) do
@@ -149,7 +167,9 @@ defmodule Mix.Tasks.PoopBags.Ci do
 
   # ---------------------------------------------------------------- report
 
-  defp render(scan, nil, _diff, _opts), do: summary_markdown(scan)
+  defp render(scan, nil, _diff, opts) do
+    if opts[:format] == "json", do: summary_json(scan), else: summary_markdown(scan)
+  end
 
   defp render(scan, _baseline, diff, opts) do
     if opts[:format] == "json" do
@@ -167,7 +187,29 @@ defmodule Mix.Tasks.PoopBags.Ci do
     functions: #{scan.functions_total} · worst CRAP: #{scan.worst_crap} · threshold: #{threshold(scan)}
     coverage: #{coverage_line(scan)}
     policy: `#{scan.stats["policy"]}`
+
+    #{provenance_markdown(scan)}
     """
+  end
+
+  defp summary_json(scan) do
+    Jason.encode!(%{
+      scan_id: scan.id,
+      baseline_id: nil,
+      threshold: threshold(scan),
+      gate_passed: true,
+      files: %{
+        done: scan.files_done,
+        total: scan.files_total,
+        failed: scan.files_failed,
+        skipped: scan.files_skipped
+      },
+      functions_total: scan.functions_total,
+      worst_crap: scan.worst_crap,
+      policy: scan.stats["policy"],
+      parsers: scan.stats["parsers"] || [],
+      analyzer_skips: scan.stats["analyzer_skips"] || []
+    })
   end
 
   defp markdown_report(_scan, diff) do
@@ -202,12 +244,48 @@ defmodule Mix.Tasks.PoopBags.Ci do
 
     #{files_line(diff.current)}
     threshold: #{threshold(diff.current)} · coverage: #{coverage_line(diff.current)}
+    policy: `#{diff.current.stats["policy"]}`
+
+    #{provenance_markdown(diff.current)}
 
     Outcomes: introduced #{s.introduced} · regressed #{s.regressed} · resolved #{s.resolved} · improved #{s.improved} · removed #{s.removed} · unchanged #{s.unchanged}
 
     #{warnings(diff)}
     #{rows}
     """
+  end
+
+  defp provenance_markdown(scan) do
+    parsers =
+      case scan.stats["parsers"] || [] do
+        [] ->
+          "Parser provenance: none recorded."
+
+        entries ->
+          "Parser provenance:\n" <>
+            Enum.map_join(entries, "\n", fn parser ->
+              "- `#{parser["parser"]}` #{parser["parser_version"]} · shared parser #{parser["package_version"]} · `#{parser["policy"]}`"
+            end)
+      end
+
+    exclusions =
+      case scan.stats["analyzer_skips"] || [] do
+        [] ->
+          "Excluded source expressions: none."
+
+        entries ->
+          "Excluded source expressions:\n" <>
+            Enum.map_join(entries, "\n", fn exclusion ->
+              detail =
+                if exclusion["reason"] == "module_scope",
+                  do: " (outside reported functions)",
+                  else: ""
+
+              "- `#{exclusion["path"]}`: `#{exclusion["reason"]}`#{detail}"
+            end)
+      end
+
+    parsers <> "\n\n" <> exclusions
   end
 
   defp warnings(%Diff{warnings: []}), do: ""
@@ -221,6 +299,9 @@ defmodule Mix.Tasks.PoopBags.Ci do
       scan_id: scan.id,
       baseline_id: diff.baseline.id,
       threshold: threshold(scan),
+      policy: scan.stats["policy"],
+      parsers: scan.stats["parsers"] || [],
+      analyzer_skips: scan.stats["analyzer_skips"] || [],
       comparable: diff.comparable,
       warnings: diff.warnings,
       summary: diff.summary,

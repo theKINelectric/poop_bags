@@ -38,6 +38,3 @@ poop_bags-*.tar
 # mix release output
 /rel/
 
-
-# MCP escript, built with `mix escript.build`
-/bin/poop_bags_mcp

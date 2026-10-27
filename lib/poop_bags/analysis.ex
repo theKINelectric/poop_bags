@@ -1,19 +1,22 @@
 defmodule PoopBags.Analysis do
-  @moduledoc """
-  Language dispatch: source text in, per-function complexity findings out.
+  @moduledoc "Language dispatch, preserving each analyzer's policy and failure evidence."
+  alias PoopBags.{ElixirAnalyzer, TokenAnalyzer, JavaScriptAnalyzer}
 
-  Elixir gets the real AST; Zig/Kotlin/Swift get the token analyzer (see
-  `PoopBags.TokenAnalyzer` for the method and its limits).
-  """
+  def analyze(source, language, opts \\ [])
+  def analyze(source, :elixir, _opts), do: ElixirAnalyzer.analyze(source)
 
-  alias PoopBags.Analysis.Finding
-  alias PoopBags.ElixirAnalyzer
-  alias PoopBags.TokenAnalyzer
+  def analyze(source, language, opts) when language in [:javascript, :typescript],
+    do: JavaScriptAnalyzer.analyze(source, language, opts)
 
-  @spec analyze(binary(), :elixir | :zig | :kotlin | :swift | :rust) ::
-          {:ok, [Finding.t()]} | {:error, :parse}
-  def analyze(source, :elixir), do: ElixirAnalyzer.analyze(source)
+  def analyze(source, language, _opts) when language in [:zig, :kotlin, :swift, :rust],
+    do: {:ok, TokenAnalyzer.analyze(source, language)}
 
-  def analyze(source, lang) when lang in [:zig, :kotlin, :swift, :rust],
-    do: {:ok, TokenAnalyzer.analyze(source, lang)}
+  def analyze_with_meta(source, language, opts \\ [])
+
+  def analyze_with_meta(source, language, opts) when language in [:javascript, :typescript],
+    do: JavaScriptAnalyzer.analyze_with_meta(source, language, opts)
+
+  def analyze_with_meta(source, language, opts) do
+    with {:ok, findings} <- analyze(source, language, opts), do: {:ok, findings, nil}
+  end
 end

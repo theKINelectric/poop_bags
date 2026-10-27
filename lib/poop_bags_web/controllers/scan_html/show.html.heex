@@ -177,6 +177,38 @@
     </p>
   </div>
 
+  <%= if (@scan.stats["parsers"] || []) != [] or (@scan.stats["analyzer_skips"] || []) != [] do %>
+    <div class="card">
+      <h2>Parser provenance</h2>
+      <p class="hint">Recorded versions identify how this scan interpreted the source.</p>
+      <ul>
+        <%= for parser <- @scan.stats["parsers"] || [] do %>
+          <li class="mono">
+            {parser["parser"]} {parser["parser_version"]} · shared parser {parser[
+              "package_version"
+            ]} · {parser["policy"]}
+          </li>
+        <% end %>
+      </ul>
+      <%= if (@scan.stats["analyzer_skips"] || []) != [] do %>
+        <h3>Source excluded from function scores</h3>
+        <ul>
+          <%= for exclusion <- @scan.stats["analyzer_skips"] do %>
+            <li>
+              <span class="mono">{exclusion["path"]}</span>:
+              <%= case exclusion["reason"] do %>
+                <% "module_scope" -> %>
+                  module_scope — expressions outside reported functions
+                <% reason -> %>
+                  {reason}
+              <% end %>
+            </li>
+          <% end %>
+        </ul>
+      <% end %>
+    </div>
+  <% end %>
+
   <div class="card">
     <div class="lang-row">
       <h2>Directory hotspots</h2>

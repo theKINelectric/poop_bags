@@ -14,8 +14,8 @@ whiffy ≤ 20, foul ≤ 50, biohazard > 50.
 
 - House production: `http://localhost:4769` (loopback only)
 - Dev instance: `http://localhost:4100`
-- MCP server (stdio, same tools): `bin/poop_bags_mcp` from a repo checkout
-  (build it with `mix escript.build`), with `POOP_BAGS_URL` set.
+- MCP server (stdio, same tools): `/Users/lloyd/PRODUCTION_SERVERS/apps/poopbags/current/bin/poop_bags_mcp`
+  or `bin/poop_bags_mcp` from a repo checkout, with `POOP_BAGS_URL` set.
 
 ## The loop (curl)
 

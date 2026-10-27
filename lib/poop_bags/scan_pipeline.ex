@@ -38,9 +38,11 @@ defmodule PoopBags.ScanPipeline do
     :language,
     :source,
     :findings,
+    :parser_meta,
     :failed_reason,
     :hash,
     :size,
+    analyzer_skips: [],
     skipped: false
   ]
 
@@ -81,14 +83,21 @@ defmodule PoopBags.ScanPipeline do
   def analyze_file(%{skipped: true} = ip, _opts), do: ip
 
   def analyze_file(ip, _opts) do
-    case Analysis.analyze(ip.source, ip.language) do
-      {:ok, findings} ->
+    case Analysis.analyze_with_meta(ip.source, ip.language, path: ip.rel_path) do
+      {:ok, findings, metadata} ->
         # The source text is dead weight past this point; drop it so the
         # belt doesn't carry every file's bytes to the end of the line.
-        %{ip | source: nil, findings: findings}
+        %{
+          ip
+          | source: nil,
+            findings: findings,
+            parser_meta: metadata && Map.delete(metadata, "skipped"),
+            analyzer_skips: if(metadata, do: Map.get(metadata, "skipped", []), else: [])
+        }
 
-      {:error, :parse} ->
-        raise ArgumentError, message: "could not parse #{ip.rel_path} as #{ip.language}"
+      {:error, reason} ->
+        raise ArgumentError,
+          message: "could not parse #{ip.rel_path} as #{ip.language}: #{inspect(reason)}"
     end
   end
 

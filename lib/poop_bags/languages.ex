@@ -11,7 +11,15 @@ defmodule PoopBags.Languages do
     ".kt" => :kotlin,
     ".kts" => :kotlin,
     ".swift" => :swift,
-    ".rs" => :rust
+    ".rs" => :rust,
+    ".js" => :javascript,
+    ".jsx" => :javascript,
+    ".mjs" => :javascript,
+    ".cjs" => :javascript,
+    ".ts" => :typescript,
+    ".tsx" => :typescript,
+    ".mts" => :typescript,
+    ".cts" => :typescript
   }
 
   # Build output, dependency caches, and vendored third-party trees are not
@@ -26,6 +34,10 @@ defmodule PoopBags.Languages do
                "cache",
                ".cache",
                ".parcel-cache",
+               ".next",
+               ".nuxt",
+               ".turbo",
+               ".svelte-kit",
                ".gradle",
                ".swiftpm",
                ".venv",
@@ -56,7 +68,9 @@ defmodule PoopBags.Languages do
   def extension_map, do: @extensions
 
   def language_for(path) do
-    Map.get(@extensions, Path.extname(path))
+    if Regex.match?(~r/\.d\.(?:ts|mts|cts)$/, path),
+      do: nil,
+      else: Map.get(@extensions, Path.extname(path))
   end
 
   def junk_dir?(name), do: MapSet.member?(@junk_dirs, name)
@@ -64,5 +78,5 @@ defmodule PoopBags.Languages do
   def max_files, do: @max_files
   def max_file_bytes, do: @max_file_bytes
 
-  def known_languages, do: ~w(elixir zig kotlin swift rust)a
+  def known_languages, do: ~w(elixir zig kotlin swift rust javascript typescript)a
 end
